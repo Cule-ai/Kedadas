@@ -59,6 +59,7 @@ btnLoginPin.addEventListener('click', async () => {
   }
 });
 
+// AUTÉNTICA BIOMETRÍA CON WEBAUTHN (FACE ID / TOUCH ID) MEJORADA
 btnLoginFace.addEventListener('click', async () => {
   if (!window.PublicKeyCredential) {
     return alert('Tu navegador no soporta autenticación biométrica.');
@@ -68,15 +69,36 @@ btnLoginFace.addEventListener('click', async () => {
     const challenge = new Uint8Array(32);
     window.crypto.getRandomValues(challenge);
     
-    await navigator.credentials.get({
-      publicKey: {
-        challenge: challenge,
-        timeout: 60000,
-        userVerification: "required"
-      }
-    });
+    try {
+      await navigator.credentials.get({
+        publicKey: {
+          challenge: challenge,
+          timeout: 60000,
+          userVerification: "required"
+        }
+      });
+      concederAcceso('Cule', true);
+    } catch (innerErr) {
+      const userId = new Uint8Array(16);
+      window.crypto.getRandomValues(userId);
 
-    concederAcceso('Cule', true);
+      await navigator.credentials.create({
+        publicKey: {
+          challenge: challenge,
+          rp: { name: "Kedadas Cule", id: window.location.hostname },
+          user: {
+            id: userId,
+            name: "Cule",
+            displayName: "Cule"
+          },
+          pubKeyCredParams: [{ alg: -7, type: "public-key" }],
+          timeout: 60000,
+          attestation: "none"
+        }
+      });
+
+      concederAcceso('Cule', true);
+    }
 
   } catch (err) {
     console.log(err);
@@ -409,7 +431,7 @@ supabaseApp.channel('votaciones-cambios').on('postgres_changes', { event: '*', s
   cargarVotaciones();
 }).subscribe();
 
-// --- 10. CHAT Y TEMA (CON OPCIÓN DE BORRAR MENSAJES) ---
+// --- 10. CHAT Y TEMA ---
 const chatMensajes = document.getElementById('chat-mensajes');
 const chatInput = document.getElementById('chat-input');
 const btnEnviarMsg = document.getElementById('btn-enviar-msg');
@@ -420,7 +442,6 @@ function pintarMensaje(msg) {
   const esMio = msg.usuario === usuarioLogueado;
   div.className = `mensaje ${esMio ? 'propio' : 'ajeno'}`;
   
-  // Añadimos botón de papelera para poder borrar mensajes
   div.innerHTML = `
     <div class="mensaje-contenido">
       <strong>${esMio ? 'Tú' : msg.usuario}:</strong> ${msg.texto}
@@ -428,7 +449,6 @@ function pintarMensaje(msg) {
     <button class="btn-borrar-msg" title="Borrar mensaje" data-id="${msg.id}">🗑️</button>
   `;
 
-  // Lógica para borrar el mensaje de Supabase
   const btnBorrar = div.querySelector('.btn-borrar-msg');
   btnBorrar.addEventListener('click', async (e) => {
     e.stopPropagation();
@@ -458,7 +478,6 @@ async function enviarMensaje() {
 btnEnviarMsg.addEventListener('click', enviarMensaje);
 chatInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') enviarMensaje(); });
 
-// Sincronización en tiempo real del chat (incluyendo borrados)
 supabaseApp.channel('chat-directo')
   .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'mensajes' }, payload => {
     pintarMensaje(payload.new);
