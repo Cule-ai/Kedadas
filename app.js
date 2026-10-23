@@ -11,13 +11,11 @@ const tituloMes = document.getElementById('mes-actual');
 const btnPrev = document.getElementById('btn-prev');
 const btnNext = document.getElementById('btn-next');
 
-// CONTENEDORES DE VISTAS
 const vistaMesContainer = document.getElementById('vista-mes-container');
 const vistaAnualContainer = document.getElementById('vista-anual-container');
 const btnToggleVista = document.getElementById('btn-toggle-vista');
 const calendarGrid = document.getElementById('calendar-grid');
 
-// ESTADOS ACTUALIZADOS
 const estados = [
   { id: 'vacio', clase: 'estado-vacio', texto: '' },
   { id: 'libre', clase: 'estado-libre', texto: 'L' },
@@ -34,7 +32,7 @@ const supabaseUrl = 'https://idpgvtixeyytfgpkqjjm.supabase.co';
 const supabaseKey = 'sb_publishable_S7NTo7XKekBigTm8U17rQA_u2Cp0SrI'; 
 const supabaseApp = supabase.createClient(supabaseUrl, supabaseKey);
 
-// --- 2. SISTEMA DE LOGIN Y ROLES ---
+// --- 2. SISTEMA DE LOGIN, ROLES Y FACE ID ---
 let usuarioLogueado = ''; 
 let miUsuario = '';       
 let esAdmin = false;
@@ -54,28 +52,55 @@ btnLoginPin.addEventListener('click', async () => {
     if (error) return alert('🚨 ERROR DE SUPABASE: ' + error.message);
     if (!data || data.length === 0) return alert(`❌ Datos incorrectos.`);
 
-    usuarioLogueado = usuarioIntento; 
-    miUsuario = usuarioIntento; 
-    esAdmin = (data[0].rol === 'admin');
-    
-    pantallaLogin.style.display = 'none'; 
-    pantallaApp.style.display = 'block';
-    btnEditarUsuarios.style.display = esAdmin ? 'inline-block' : 'none';
-    
-    renderizarSelector();
-    iniciarCalendario();
-    cargarChatInicial();
-    setTimeout(cargarVotaciones, 500); 
-    
+    concederAcceso(usuarioIntento, data[0].rol === 'admin');
   } catch (err) {
     alert('🚨 ERROR FATAL: ' + err.message);
     btnLoginPin.textContent = 'Entrar con PIN';
   }
 });
 
-btnLoginFace.addEventListener('click', () => {
-  alert('La biometría FaceID se configurará cuando subamos la app a internet con HTTPS.');
+// AUTÉNTICA BIOMETRÍA CON WEBAUTHN (FACE ID / TOUCH ID)
+btnLoginFace.addEventListener('click', async () => {
+  if (!window.PublicKeyCredential) {
+    return alert('Tu navegador no soporta autenticación biométrica.');
+  }
+
+  try {
+    const challenge = new Uint8Array(32);
+    window.crypto.getRandomValues(challenge);
+    
+    // Petición nativa de Face ID al sistema operativo del iPhone
+    await navigator.credentials.get({
+      publicKey: {
+        challenge: challenge,
+        timeout: 60000,
+        userVerification: "required"
+      }
+    });
+
+    // Si Face ID reconoce tu cara con éxito, te loguea automáticamente como Cule
+    concederAcceso('Cule', true);
+
+  } catch (err) {
+    console.log(err);
+    alert('❌ No se pudo verificar con Face ID o cancelaste el proceso.');
+  }
 });
+
+function concederAcceso(nombreUsuario, rolAdmin) {
+  usuarioLogueado = nombreUsuario; 
+  miUsuario = nombreUsuario; 
+  esAdmin = rolAdmin;
+  
+  pantallaLogin.style.display = 'none'; 
+  pantallaApp.style.display = 'block';
+  btnEditarUsuarios.style.display = esAdmin ? 'inline-block' : 'none';
+  
+  renderizarSelector();
+  iniciarCalendario();
+  cargarChatInicial();
+  setTimeout(cargarVotaciones, 500);
+}
 
 // --- 3. GESTIÓN DINÁMICA DE USUARIOS ---
 let usuarios = ['Cule', 'Persona 2', 'Persona 3', 'Persona 4'];
@@ -142,7 +167,7 @@ selectorUsuario.addEventListener('change', (e) => {
 // --- 5. LÓGICA DE NUBE ---
 async function guardarTurnoNube(dia, indiceEstado, mesAnioEspecifico = null) {
   const mesAnio = mesAnioEspecifico || `${fechaNavegacion.getFullYear()}-${fechaNavegacion.getMonth()}`;
-  const { data, error: errorLeer } = await supabaseApp.from('Turnos').select('id').eq('dia', dia).eq('usuario', miUsuario).eq('mes_anio', mesAnio);
+  const { data } = await supabaseApp.from('Turnos').select('id').eq('dia', dia).eq('usuario', miUsuario).eq('mes_anio', mesAnio);
 
   if (data && data.length > 0) {
     await supabaseApp.from('Turnos').update({ indiceEstado: indiceEstado }).eq('id', data[0].id);
@@ -152,12 +177,12 @@ async function guardarTurnoNube(dia, indiceEstado, mesAnioEspecifico = null) {
 }
 
 async function obtenerTurnosMesNube() {
-  const { data, error } = await supabaseApp.from('Turnos').select('*').eq('usuario', miUsuario).eq('mes_anio', `${fechaNavegacion.getFullYear()}-${fechaNavegacion.getMonth()}`);
+  const { data } = await supabaseApp.from('Turnos').select('*').eq('usuario', miUsuario).eq('mes_anio', `${fechaNavegacion.getFullYear()}-${fechaNavegacion.getMonth()}`);
   return data || [];
 }
 
 async function obtenerTurnosAnoNube() {
-  const { data, error } = await supabaseApp.from('Turnos').select('*').eq('usuario', miUsuario).like('mes_anio', `${fechaNavegacion.getFullYear()}-%`);
+  const { data } = await supabaseApp.from('Turnos').select('*').eq('usuario', miUsuario).like('mes_anio', `${fechaNavegacion.getFullYear()}-%`);
   return data || [];
 }
 
@@ -336,7 +361,7 @@ btnSecuencia.addEventListener('click', async () => {
   iniciarCalendario();
 });
 
-// --- 9. SISTEMA DE VOTACIONES (Con Ranking y Ordenación) ---
+// --- 9. SISTEMA DE VOTACIONES ---
 const listaVotaciones = document.getElementById('lista-votaciones');
 
 async function cargarVotaciones() {
