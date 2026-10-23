@@ -59,7 +59,6 @@ btnLoginPin.addEventListener('click', async () => {
   }
 });
 
-// AUTÉNTICA BIOMETRÍA CON WEBAUTHN (FACE ID / TOUCH ID)
 btnLoginFace.addEventListener('click', async () => {
   if (!window.PublicKeyCredential) {
     return alert('Tu navegador no soporta autenticación biométrica.');
@@ -69,7 +68,6 @@ btnLoginFace.addEventListener('click', async () => {
     const challenge = new Uint8Array(32);
     window.crypto.getRandomValues(challenge);
     
-    // Petición nativa de Face ID al sistema operativo del iPhone
     await navigator.credentials.get({
       publicKey: {
         challenge: challenge,
@@ -78,7 +76,6 @@ btnLoginFace.addEventListener('click', async () => {
       }
     });
 
-    // Si Face ID reconoce tu cara con éxito, te loguea automáticamente como Cule
     concederAcceso('Cule', true);
 
   } catch (err) {
@@ -412,7 +409,7 @@ supabaseApp.channel('votaciones-cambios').on('postgres_changes', { event: '*', s
   cargarVotaciones();
 }).subscribe();
 
-// --- 10. CHAT Y TEMA ---
+// --- 10. CHAT Y TEMA (CON OPCIÓN DE BORRAR MENSAJES) ---
 const chatMensajes = document.getElementById('chat-mensajes');
 const chatInput = document.getElementById('chat-input');
 const btnEnviarMsg = document.getElementById('btn-enviar-msg');
@@ -422,7 +419,25 @@ function pintarMensaje(msg) {
   const div = document.createElement('div');
   const esMio = msg.usuario === usuarioLogueado;
   div.className = `mensaje ${esMio ? 'propio' : 'ajeno'}`;
-  div.innerHTML = `<strong>${esMio ? 'Tú' : msg.usuario}:</strong> ${msg.texto}`;
+  
+  // Añadimos botón de papelera para poder borrar mensajes
+  div.innerHTML = `
+    <div class="mensaje-contenido">
+      <strong>${esMio ? 'Tú' : msg.usuario}:</strong> ${msg.texto}
+    </div>
+    <button class="btn-borrar-msg" title="Borrar mensaje" data-id="${msg.id}">🗑️</button>
+  `;
+
+  // Lógica para borrar el mensaje de Supabase
+  const btnBorrar = div.querySelector('.btn-borrar-msg');
+  btnBorrar.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (confirm('¿Seguro que quieres borrar este mensaje?')) {
+      await supabaseApp.from('mensajes').delete().eq('id', msg.id);
+      div.remove();
+    }
+  });
+
   chatMensajes.appendChild(div);
   chatMensajes.scrollTop = chatMensajes.scrollHeight;
 }
@@ -443,9 +458,16 @@ async function enviarMensaje() {
 btnEnviarMsg.addEventListener('click', enviarMensaje);
 chatInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') enviarMensaje(); });
 
-supabaseApp.channel('chat-directo').on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'mensajes' }, payload => {
-  pintarMensaje(payload.new);
-}).subscribe();
+// Sincronización en tiempo real del chat (incluyendo borrados)
+supabaseApp.channel('chat-directo')
+  .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'mensajes' }, payload => {
+    pintarMensaje(payload.new);
+  })
+  .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'mensajes' }, payload => {
+    const elemento = chatMensajes.querySelector(`[data-id="${payload.old.id}"]`);
+    if (elemento) elemento.closest('.mensaje').remove();
+  })
+  .subscribe();
 
 if (selectorTema) {
   const temaGuardado = localStorage.getItem('tema-kedadas') || 'auto';
