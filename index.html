@@ -2,11 +2,26 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Kedadas</title>
-  <link rel="icon" href="icono.png" type="image/png">
+  
+  <!-- Iconos para iPhone y dispositivos Apple -->
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="apple-touch-icon-precomposed" href="apple-touch-icon-precomposed.png">
+  
+  <!-- Iconos para navegadores y PWA -->
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="icono-192.png">
+  <link rel="icon" type="image/png" sizes="512x512" href="icono-512.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  
+  <!-- Configuración PWA iPhone / iOS -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Kedadas">
+  <meta name="theme-color" content="#4f46e5">
   <link rel="stylesheet" href="style.css">
-      <link rel="apple-touch-icon" href="https://images.emojiterra.com/apple/ios-16/512w/1f4c5.png">
 </head>
 <body>
 
@@ -19,22 +34,70 @@
   <div id="pantalla-login" class="login-container">
     <h2>Kedadas</h2>
     <p>Cuadrante de Turnos</p>
-    
-    <select id="login-usuario">
-      <option value="Cule">Cule</option>
-      <option value="Persona 2">Persona 2</option>
-      <option value="Persona 3">Persona 3</option>
-      <option value="Persona 4">Persona 4</option>
-    </select>
-    
-    <input type="password" id="login-pin" placeholder="PIN de 4 dígitos" inputmode="numeric" maxlength="4">
-    
-    <button id="btn-login-pin" class="btn-login">Entrar con PIN</button>
-    <button id="btn-login-faceid" class="btn-faceid">😎 Entrar con Face ID</button>
+
+    <div class="login-tabs">
+      <button type="button" id="tab-auth-pin" class="login-tab activo">🔢 PIN Rápido</button>
+      <button type="button" id="tab-auth-email" class="login-tab">🔐 Cuenta & Clave</button>
+    </div>
+
+    <!-- Formulario Supabase Auth (Email / Contraseña) -->
+    <div id="form-auth-email" class="login-form-seccion" style="display: none;">
+      <input type="text" id="login-nombre-reg" placeholder="Tu Nombre (si te registras)" style="display: none;">
+      <input type="email" id="login-email" placeholder="Correo electrónico" autocomplete="email">
+      <input type="password" id="login-password" placeholder="Contraseña" autocomplete="current-password">
+      <div class="auth-buttons-row">
+        <button id="btn-login-email" class="btn-login">Iniciar Sesión</button>
+        <button id="btn-register-email" class="btn-register">Registrarse</button>
+      </div>
+      <a href="#" id="link-recuperar-pass" class="link-recuperar">¿Olvidaste tu contraseña?</a>
+    </div>
+
+    <!-- Formulario PIN clásico -->
+    <div id="form-auth-pin" class="login-form-seccion" style="display: block;">
+      <select id="login-usuario">
+        <option value="">Cargando personas...</option>
+      </select>
+      <input type="password" id="login-pin" placeholder="PIN de 4 dígitos" inputmode="numeric" maxlength="4">
+      <button id="btn-login-pin" class="btn-login">Entrar con PIN</button>
+      <a href="#" id="link-crear-mi-pin" class="link-recuperar" style="display: block; margin-top: 8px;">🔑 ¿Crear o cambiar tu PIN?</a>
+    </div>
+
+    <div class="divisor-login"><span>o bien</span></div>
+    <button id="btn-login-faceid" class="btn-faceid">😎 Entrar con Face ID / Touch ID</button>
   </div>
 
   <div id="pantalla-app" class="calendar-container" style="display: none;">
     
+    <!-- BARRA DE USUARIO Y OPCIONES RÁPIDAS -->
+    <div class="user-profile-bar">
+      <div class="user-badge" id="badge-usuario-sesion">👤 Conectado como: Cule</div>
+      <div class="profile-actions">
+        <button id="btn-top-personas" class="btn-chip-action" title="Gestionar personas y claves">👥 Personas y PINs</button>
+        <button id="btn-activar-passkey" class="btn-chip-action" title="Vincular Face ID / Touch ID">🔑 Face ID</button>
+        <button id="btn-notificaciones" class="btn-chip-action" title="Activar avisos de coincidencias">🔔 Notificaciones</button>
+        <button id="btn-logout" class="btn-chip-action btn-danger-chip" title="Cerrar sesión">🚪 Salir</button>
+      </div>
+    </div>
+
+    <!-- BARRA SELECTORA DE GRUPO ACTIVO -->
+    <div class="grupo-selector-bar">
+      <div class="grupo-select-wrap">
+        <label for="selector-grupo-activo" class="grupo-label">👥 Grupo:</label>
+        <select id="selector-grupo-activo" class="selector-grupo-dropdown">
+          <option value="Amigos">🍻 Amigos</option>
+          <option value="Familia">👨‍👩‍👧‍👦 Familia</option>
+          <option value="Pareja">💑 Pareja</option>
+          <option value="Hijos">👶 Hijos</option>
+        </select>
+      </div>
+      <button id="btn-abrir-modal-grupos" class="btn-chip-action btn-nuevo-grupo-chip" title="Crear o gestionar grupos">➕ Administrar Grupos</button>
+    </div>
+
+    <!-- BANNER INDICADOR DE GRUPO ACTIVO -->
+    <div id="badge-grupo-banner" class="badge-grupo-banner">
+      <span class="grupo-banner-icon">📌</span> Viendo cuadrante y planes de: <strong id="nombre-grupo-banner">🍻 Amigos</strong>
+    </div>
+
     <!-- CABECERA COMÚN -->
     <div class="calendar-header">
       <button id="btn-prev">◀</button>
@@ -47,9 +110,50 @@
     </div>
     
     <div class="user-selector-container">
-      <label for="usuario-activo">Viendo a:</label>
-      <select id="usuario-activo"></select>
-      <button id="btn-editar-usuarios" title="Editar lista de personas (Solo Admin)">⚙️</button>
+      <div class="user-select-group">
+        <label for="usuario-activo">Viendo a:</label>
+        <select id="usuario-activo" title="Elige de quién ver los turnos en el calendario"></select>
+      </div>
+      <button id="btn-editar-usuarios" class="btn-gestionar-personas" type="button" title="Añadir, quitar personas y configurar PINs">
+        👥 Personas y PINs <span id="flecha-desplegable-usuarios">▾</span>
+      </button>
+    </div>
+
+    <!-- PANEL DESPLEGABLE DE GESTIÓN RÁPIDA DE USUARIOS Y CLAVES -->
+    <div id="panel-desplegable-usuarios" class="panel-desplegable-usuarios" style="display: none;">
+      <div class="desplegable-header">
+        <span class="desplegable-titulo">⚙️ Gestión Rápida de Personas y Claves</span>
+        <button type="button" id="btn-abrir-modal-completo-usuarios" class="btn-link-sm">Ver tarjetas / Administrar todos</button>
+      </div>
+
+      <!-- DESPLEGABLE PARA ELEGIR QUÉ PERSONA EDITAR -->
+      <div class="editor-persona-desplegable-wrap">
+        <label for="select-persona-a-editar">👤 Selecciona una persona para cambiar su PIN:</label>
+        <div class="fila-edicion-persona">
+          <select id="select-persona-a-editar" class="select-persona-dropdown"></select>
+          <div class="pin-edit-box">
+            <span class="pin-label-mini">PIN:</span>
+            <input type="password" id="input-pin-editar-desplegable" maxlength="4" inputmode="numeric" placeholder="4 núm">
+            <button type="button" id="btn-toggle-eye-desplegable" class="btn-mini-icon" title="Mostrar/ocultar PIN">👁️</button>
+            <button type="button" id="btn-guardar-pin-desplegable" class="btn-guardar-pin-mini" title="Guardar PIN">💾 Guardar PIN</button>
+            <button type="button" id="btn-borrar-persona-desplegable" class="btn-borrar-user-mini" title="Eliminar persona seleccionada">🗑️</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- SECCIÓN AÑADIR NUEVA PERSONA -->
+      <div class="desplegable-nuevo-usuario-row">
+        <span class="nuevo-user-badge-mini">➕ Añadir nueva persona al cuadrante:</span>
+        <div class="nuevo-user-inputs">
+          <input type="text" id="nuevo-nombre-desplegable" placeholder="Nombre (ej. Laura)" maxlength="20">
+          <input type="password" id="nuevo-pin-desplegable" placeholder="PIN (4 núm)" maxlength="4" inputmode="numeric">
+          <select id="nuevo-rol-desplegable">
+            <option value="usuario">Usuario</option>
+            <option value="admin">Admin</option>
+          </select>
+          <button type="button" id="btn-crear-usuario-desplegable" class="btn-sec-primario-sm">➕ Añadir</button>
+        </div>
+      </div>
     </div>
     
     <div class="leyenda">
@@ -67,13 +171,43 @@
       <div class="panel-principal">
         <!-- CONTENEDOR DEL MES -->
         <div id="vista-mes-container">
-          <button id="btn-secuencia" class="btn-secuencia">✨ Rellenar mes por secuencia</button>
+          <div class="acciones-cuadrante-row">
+            <button id="btn-secuencia" class="btn-secuencia">✨ Rellenar por secuencia</button>
+            <button id="btn-abrir-scan-foto" class="btn-scan-foto">📷 Escanear con IA</button>
+            <button type="button" id="btn-guardar-horario-top" class="btn-guardar-horario-top" title="Guardar modificaciones del horario">💾 Guardar Horario</button>
+          </div>
           <div class="weekdays">
             <div>L</div><div>M</div><div>X</div><div>J</div><div>V</div><div>S</div><div>D</div>
           </div>
           <div class="days-grid" id="calendar-grid"></div>
-          <button id="btn-coincidencias" class="btn-coincidencias">🔍 Buscar días libres en común</button>
-          <div id="resultado-coincidencias" class="resultados-box"></div>
+
+          <!-- BARRA DE CONFIRMACIÓN Y GUARDADO DE HORARIO -->
+          <div id="barra-guardar-horario" class="barra-guardar-horario" style="display: none;">
+            <div class="guardar-info">
+              <span class="guardar-icono">⚠️</span>
+              <span id="texto-cambios-pendientes">Tienes modificaciones sin guardar en el cuadrante</span>
+            </div>
+            <div class="guardar-botones">
+              <button type="button" id="btn-cancelar-cambios-horario" class="btn-sec-secundario-sm">↺ Descartar</button>
+              <button type="button" id="btn-guardar-cambios-horario" class="btn-sec-primario-sm btn-destacado-guardar">💾 Guardar Horario</button>
+            </div>
+          </div>
+
+          <div class="coincidencias-seccion">
+            <div class="coincidencias-filtro-container">
+              <div class="filtro-header">
+                <span class="filtro-titulo">👥 ¿Con quién quieres coincidir?</span>
+                <div class="filtro-botones">
+                  <button type="button" id="btn-sel-todos" class="btn-link-sm">Todos</button>
+                  <span class="sep">|</span>
+                  <button type="button" id="btn-sel-ninguno" class="btn-link-sm">Ninguno</button>
+                </div>
+              </div>
+              <div id="coincidencias-usuarios-lista" class="coincidencias-usuarios-lista"></div>
+            </div>
+            <button id="btn-coincidencias" class="btn-coincidencias">🔍 Buscar días libres en común</button>
+            <div id="resultado-coincidencias" class="resultados-box"></div>
+          </div>
         </div>
 
         <!-- CONTENEDOR DEL AÑO -->
@@ -82,26 +216,315 @@
 
       <!-- COLUMNA DERECHA: VOTACIONES Y CHAT -->
       <div class="panel-lateral">
-        <div class="votaciones-container">
-          <h3 class="votaciones-titulo">🎯 ¿Qué hacemos? (Votación)</h3>
+        <div class="votaciones-container" id="seccion-votaciones">
+          <div class="votaciones-header-row">
+            <h3 class="votaciones-titulo">🎯 ¿Qué hacemos? (Planes)</h3>
+            <button type="button" id="btn-toggle-nuevo-plan" class="btn-link-sm" title="Proponer nueva idea de plan">➕ Proponer</button>
+          </div>
+          
+          <!-- Formulario para proponer plan -->
+          <div id="form-nuevo-plan" class="form-nuevo-plan" style="display: none;">
+            <input type="text" id="input-nuevo-plan" placeholder="Ej: 🍕 Cenar pizza, 🎾 Pádel, 🎬 Cine..." maxlength="40">
+            <button type="button" id="btn-guardar-nuevo-plan" class="btn-sec-primario-sm">Añadir Plan</button>
+          </div>
+
           <div id="lista-votaciones" class="lista-votaciones">
-            <p>Cargando opciones...</p>
+            <p class="cargando-planes">Cargando planes del grupo...</p>
           </div>
         </div>
 
         <hr class="divisor">
         
         <div class="chat-container">
-          <h3 class="chat-titulo">💬 Tablón de Avisos</h3>
+          <h3 class="chat-titulo" id="chat-titulo-grupo">💬 Tablón de Avisos</h3>
           <div class="chat-mensajes" id="chat-mensajes"></div>
           <div class="chat-input-area">
-            <input type="text" id="chat-input" placeholder="Escribe un mensaje...">
+            <input type="text" id="chat-input" placeholder="Escribe un mensaje para el grupo...">
             <button id="btn-enviar-msg">Enviar</button>
           </div>
         </div>
       </div>
 
     </div> <!-- Fin desktop-layout -->
+  </div>
+
+  <!-- MODAL SECUENCIA AVANZADA -->
+  <div id="modal-secuencia" class="modal-overlay" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>✨ Rellenar por secuencia</h3>
+        <button id="btn-cerrar-modal-secuencia" class="btn-cerrar" title="Cerrar">&times;</button>
+      </div>
+      <div class="modal-body">
+        <label for="sec-patron" class="sec-label">Patrón de turnos:</label>
+        <input type="text" id="sec-patron" placeholder="Ej: M, M, T, T, N, N, L, L" value="M, M, T, T, N, N, L, L">
+        
+        <div class="quick-chips">
+          <button type="button" data-val="M" class="chip-btn chip-m">+ Mañana (M)</button>
+          <button type="button" data-val="T" class="chip-btn chip-t">+ Tarde (T)</button>
+          <button type="button" data-val="N" class="chip-btn chip-n">+ Noche (N)</button>
+          <button type="button" data-val="L" class="chip-btn chip-l">+ Libre (L)</button>
+          <button type="button" data-val="V" class="chip-btn chip-v">+ Vacaciones (V)</button>
+          <button type="button" id="btn-limpiar-patron" class="chip-btn chip-clear">Limpiar</button>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="sec-fecha-inicio">Fecha de inicio:</label>
+            <input type="date" id="sec-fecha-inicio">
+          </div>
+          <div class="form-group">
+            <label for="sec-tipo-fin">Hasta:</label>
+            <select id="sec-tipo-fin">
+              <option value="fin-mes">Fin de este mes</option>
+              <option value="fin-ano">Hasta fin de año</option>
+              <option value="fecha">Fecha específica...</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group" id="grupo-fecha-fin" style="display: none;">
+          <label for="sec-fecha-fin">Fecha de fin:</label>
+          <input type="date" id="sec-fecha-fin">
+        </div>
+
+        <div class="checkbox-container">
+          <label class="custom-checkbox">
+            <input type="checkbox" id="sec-respetar-vacaciones" checked>
+            <span>🛡️ Respetar vacaciones ya marcadas (V)</span>
+          </label>
+        </div>
+
+        <div id="sec-preview-box" class="preview-box" style="display: none;"></div>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-sec-preview" class="btn-sec-secundario">👁️ Previsualizar</button>
+        <button id="btn-sec-confirmar" class="btn-sec-primario" style="display: none;">✅ Aplicar cambios</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL ESCANEAR CUADRANTE DESDE FOTO CON IA -->
+  <div id="modal-scan-cuadrante" class="modal-overlay" style="display: none;">
+    <div class="modal-card modal-card-scan">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <h3>📷 Escanear cuadrante con IA</h3>
+          <span class="badge-ia-pill">Gemini Vision</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <button type="button" id="btn-toggle-config-ia" class="btn-chip-action" title="Configurar clave de IA">⚙️ Clave IA</button>
+          <button id="btn-cerrar-modal-scan" class="btn-cerrar" title="Cerrar">&times;</button>
+        </div>
+      </div>
+      <div class="modal-body">
+        
+        <!-- PANEL DE CONFIGURACIÓN DE CLAVE GEMINI (COLAPSABLE) -->
+        <div id="box-config-ia" class="box-config-ia" style="display: none;">
+          <div class="config-ia-header">
+            <h4>🔑 Configuración de IA de Visión (Google Gemini)</h4>
+            <span class="config-ia-badge-free">100% Gratis</span>
+          </div>
+          <p class="config-ia-desc">
+            Para digitalizar cuadrantes automáticamente desde fotos o capturas, puedes usar una clave gratuita de <strong>Google AI Studio</strong> (15 consultas/minuto gratis).
+          </p>
+          <div class="config-ia-input-row">
+            <input type="password" id="input-gemini-key" placeholder="Pega aquí tu clave AI Studio (AIzaSy...)" autocomplete="off">
+            <button type="button" id="btn-toggle-eye-gemini" class="btn-chip-action" title="Mostrar/ocultar">👁️</button>
+            <button type="button" id="btn-guardar-gemini-key" class="btn-sec-primario-sm">💾 Guardar</button>
+          </div>
+          <div class="config-ia-help-row">
+            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" class="link-recuperar" style="font-size: 0.8rem;">
+              👉 Pulsa aquí para conseguir tu clave gratis en Google AI Studio en 30 segundos
+            </a>
+            <span id="status-gemini-key" class="status-gemini-key"></span>
+          </div>
+        </div>
+
+        <p class="scan-instrucciones">
+          Haz una foto o sube tu cuadrante laboral (en papel, pantalla o PDF). La IA reconocerá automáticamente los turnos (M, T, N, L, V), ya sea de <strong>un mes o del año completo</strong>.
+        </p>
+
+        <!-- Zona de selección de imagen -->
+        <div class="drop-zone" id="drop-zone-foto">
+          <input type="file" id="input-foto-cuadrante" accept="image/*" capture="environment" style="display: none;">
+          <div class="drop-zone-content">
+            <span class="drop-icon">📸</span>
+            <p><strong>Haz una foto</strong> con la cámara o selecciona una imagen</p>
+            <button type="button" id="btn-elegir-foto" class="btn-sec-secundario">Elegir archivo</button>
+          </div>
+          <div class="preview-wrap-scan" style="display: none;" id="wrap-preview-scan">
+            <img id="preview-foto-cuadrante" class="preview-imagen-scan" alt="Vista previa de cuadrante">
+            <button type="button" id="btn-cambiar-foto" class="btn-link-sm" style="margin-top: 6px; display: inline-block;">↺ Cambiar foto</button>
+          </div>
+        </div>
+
+        <!-- Parámetros del escaneo -->
+        <div class="scan-options-card" id="scan-config-row" style="display: none;">
+          <div class="scan-mode-selector">
+            <label class="scan-mode-option">
+              <input type="radio" name="scan-modo" value="auto" checked>
+              <span>✨ Automático (Detectar mes o año según foto)</span>
+            </label>
+            <label class="scan-mode-option">
+              <input type="radio" name="scan-modo" value="mes">
+              <span>📅 Mes específico</span>
+            </label>
+            <label class="scan-mode-option">
+              <input type="radio" name="scan-modo" value="ano">
+              <span>📆 Año completo (12 meses)</span>
+            </label>
+          </div>
+
+          <div class="form-row" style="margin-top: 10px;">
+            <div class="form-group">
+              <label for="scan-usuario-objetivo">👤 Trabajador a extraer:</label>
+              <select id="scan-usuario-objetivo"></select>
+            </div>
+            <div class="form-group" id="grupo-scan-mes">
+              <label for="scan-mes-objetivo">Mes de referencia:</label>
+              <select id="scan-mes-objetivo"></select>
+            </div>
+            <div class="form-group">
+              <label for="scan-ano-objetivo">Año de referencia:</label>
+              <input type="number" id="scan-ano-objetivo" min="2024" max="2035">
+            </div>
+          </div>
+        </div>
+
+        <!-- Estado de análisis animado -->
+        <div id="scan-loading-state" class="loading-state" style="display: none;">
+          <div class="spinner"></div>
+          <p id="scan-status-text" class="scan-status-main">Analizando imagen con IA de Visión...</p>
+          <span id="scan-status-sub" class="scan-status-sub">Conectando con Google Gemini Vision...</span>
+        </div>
+
+        <!-- Tabla interactiva de revisión -->
+        <div id="scan-revision-container" class="revision-container" style="display: none;">
+          <div class="revision-header">
+            <div>
+              <h4 id="scan-revision-titulo">📋 Revisa los turnos detectados:</h4>
+              <span id="scan-revision-sub" class="revision-sub">Toca cualquier turno si necesitas corregirlo antes de volcarlo al calendario</span>
+            </div>
+            <div id="scan-stats-pills" class="scan-stats-pills"></div>
+          </div>
+
+          <!-- Selector de meses si es multimes o año completo -->
+          <div id="scan-meses-tabs" class="scan-meses-tabs" style="display: none;"></div>
+
+          <div id="scan-dias-grid" class="scan-dias-grid"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-analizar-foto" class="btn-sec-primario" style="display: none;">🔍 Analizar cuadrante con IA</button>
+        <button id="btn-guardar-scan" class="btn-sec-primario btn-destacado-guardar" style="display: none;">💾 Guardar en mi cuadrante</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL GESTIÓN DE USUARIOS Y PINS -->
+  <div id="modal-gestion-usuarios" class="modal-overlay" style="display: none;">
+    <div class="modal-card modal-card-usuarios">
+      <div class="modal-header">
+        <h3>👥 Gestión de Personas y PINs</h3>
+        <button id="btn-cerrar-modal-usuarios" class="btn-cerrar" title="Cerrar">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc-sub">
+          Añade o quita miembros del cuadrante y configura el PIN de 4 dígitos de cada persona para que puedan entrar.
+        </p>
+
+        <!-- Formulario para añadir nueva persona -->
+        <div class="box-nuevo-usuario">
+          <h4>➕ Añadir nueva persona</h4>
+          <div class="form-nuevo-usuario-row">
+            <input type="text" id="nuevo-user-nombre" placeholder="Nombre (ej: María)" maxlength="20">
+            <input type="password" id="nuevo-user-pin" placeholder="PIN (4 núm)" inputmode="numeric" maxlength="4">
+            <select id="nuevo-user-rol">
+              <option value="usuario">Usuario</option>
+              <option value="admin">Admin</option>
+            </select>
+            <button type="button" id="btn-crear-usuario" class="btn-sec-primario">Añadir</button>
+          </div>
+        </div>
+
+        <!-- Lista de personas existentes -->
+        <div class="seccion-lista-usuarios">
+          <h4>📋 Personas del grupo y sus PINs:</h4>
+          <div id="lista-usuarios-gestion" class="lista-usuarios-gestion">
+            <p class="loading-text">Cargando personas...</p>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="btn-cerrar-gestion-user" class="btn-sec-secundario">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL RÁPIDO PARA CREAR/CAMBIAR PIN (DESDE LOGIN O APP) -->
+  <div id="modal-crear-pin" class="modal-overlay" style="display: none;">
+    <div class="modal-card" style="max-width: 420px;">
+      <div class="modal-header">
+        <h3>🔑 Crear o Cambiar PIN</h3>
+        <button id="btn-cerrar-modal-pin" class="btn-cerrar" title="Cerrar">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc-sub">Elige tu nombre en el desplegable o escribe tu nombre si eres nuevo, y define tu PIN de 4 dígitos para entrar.</p>
+        
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label for="pin-crear-nombre-sel">👤 Elige tu persona en el desplegable:</label>
+          <select id="pin-crear-nombre-sel" class="select-persona-dropdown" style="width: 100%; margin-bottom: 8px;"></select>
+          <label for="pin-crear-nombre" style="font-size: 0.8rem; color: #64748b;">O bien escribe un nuevo nombre:</label>
+          <input type="text" id="pin-crear-nombre" placeholder="Nuevo nombre (ej: Laura, Carlos...)">
+        </div>
+
+        <div class="form-group" style="margin-bottom: 12px;">
+          <label for="pin-crear-valor">🔒 Tu PIN de 4 dígitos:</label>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <input type="password" id="pin-crear-valor" placeholder="4 núm" inputmode="numeric" maxlength="4" style="letter-spacing: 6px; font-weight: 800; text-align: center; font-size: 1.2rem; flex: 1; padding: 10px; border-radius: 10px; border: 1.5px solid #cbd5e1;">
+            <button type="button" id="btn-toggle-eye-crear-pin" class="btn-chip-action" style="padding: 10px 14px; font-size: 1.1rem;" title="Mostrar/ocultar PIN">👁️</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="btn-guardar-mi-pin" class="btn-sec-primario">💾 Guardar PIN</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL GESTIÓN Y CREACIÓN DE GRUPOS -->
+  <div id="modal-gestionar-grupos" class="modal-overlay" style="display: none;">
+    <div class="modal-card" style="max-width: 500px;">
+      <div class="modal-header">
+        <h3>👥 Mis Grupos</h3>
+        <button id="btn-cerrar-modal-grupos" class="btn-cerrar" title="Cerrar">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc-sub">Organiza cuadrantes separados para diferentes círculos (amigos, familia, pareja, hijos...).</p>
+        
+        <!-- Formulario nuevo grupo -->
+        <div class="box-nuevo-usuario">
+          <h4>➕ Crear nuevo grupo</h4>
+          <div class="form-nuevo-grupo-row">
+            <input type="text" id="nuevo-grupo-icono" placeholder="Emoji (ej: 🍻, 👨‍👩‍👧, 💼)" maxlength="4" style="width: 70px; text-align: center;">
+            <input type="text" id="nuevo-grupo-nombre" placeholder="Nombre (ej: Trabajo, Padel...)" maxlength="25">
+            <button type="button" id="btn-guardar-nuevo-grupo" class="btn-sec-primario">Crear</button>
+          </div>
+        </div>
+
+        <!-- Lista de grupos existentes -->
+        <div class="seccion-lista-usuarios">
+          <h4>📋 Grupos disponibles:</h4>
+          <div id="lista-grupos-gestion" class="lista-usuarios-gestion">
+            <p class="loading-text">Cargando grupos...</p>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="btn-cerrar-grupos-footer" class="btn-sec-secundario">Cerrar</button>
+      </div>
+    </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
