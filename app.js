@@ -1970,26 +1970,54 @@ function pintarPlanesEnPantalla() {
     div.className = `opcion-voto ${yaVote ? 'votado' : ''}`;
     
     div.innerHTML = `
-      <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+      <div class="opcion-header-row">
         <span class="opcion-texto">${item.opcion}</span>
-        <button type="button" class="btn-borrar-plan-mini" title="Eliminar plan" style="background: none; border: none; cursor: pointer; opacity: 0.4; font-size: 0.85rem; padding: 2px 5px;">✕</button>
+        <div class="plan-acciones-btns">
+          <button type="button" class="btn-accion-plan btn-editar-plan" title="Editar plan">✏️</button>
+          <button type="button" class="btn-accion-plan btn-borrar-plan" title="Eliminar plan">🗑️</button>
+        </div>
       </div>
       <div class="opcion-bar">
-        <span>${numVotos > 0 ? votantes.join(', ') : 'Sin votos aún'}</span>
+        <span class="votantes-lista">${numVotos > 0 ? votantes.join(', ') : 'Sin votos aún (toca para votar)'}</span>
         <span class="voto-badge">${numVotos} ${numVotos === 1 ? 'voto' : 'votos'}</span>
       </div>
     `;
 
-    // Botón borrar plan
-    const btnBorrar = div.querySelector('.btn-borrar-plan-mini');
-    btnBorrar.addEventListener('click', (e) => {
+    // Botón editar plan
+    const btnEditar = div.querySelector('.btn-editar-plan');
+    btnEditar.addEventListener('click', async (e) => {
       e.stopPropagation();
-      if (confirm(`¿Eliminar la propuesta "${item.opcion}" de ${grupoActivo}?`)) {
+      const nuevoTexto = prompt(`Editar plan en el grupo "${grupoActivo}":`, item.opcion);
+      if (nuevoTexto !== null) {
+        const textoLimpio = nuevoTexto.trim();
+        if (!textoLimpio) return alert('El texto del plan no puede quedar vacío.');
+        item.opcion = textoLimpio;
+        guardarPlanesLocales();
+        pintarPlanesEnPantalla();
+        if (typeof item.id === 'number') {
+          try {
+            await supabaseApp.from('votaciones').update({ opcion: textoLimpio }).eq('id', item.id);
+          } catch(err) {
+            console.warn('Aviso editando plan en Supabase:', err);
+          }
+        }
+      }
+    });
+
+    // Botón borrar plan
+    const btnBorrar = div.querySelector('.btn-borrar-plan');
+    btnBorrar.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (confirm(`¿Eliminar la propuesta "${item.opcion}" del grupo "${grupoActivo}"?`)) {
         listaPlanesMemoria = listaPlanesMemoria.filter(p => p.id !== item.id);
         guardarPlanesLocales();
         pintarPlanesEnPantalla();
         if (typeof item.id === 'number') {
-          supabaseApp.from('votaciones').delete().eq('id', item.id).then(() => {}).catch(() => {});
+          try {
+            await supabaseApp.from('votaciones').delete().eq('id', item.id);
+          } catch(err) {
+            console.warn('Aviso borrando plan en Supabase:', err);
+          }
         }
       }
     });

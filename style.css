@@ -154,12 +154,103 @@ body {
 .votaciones-container { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 16px; padding: 15px; margin-bottom: 20px; }
 .votaciones-titulo { margin: 0 0 15px 0; font-size: 1.1rem; color: #334155; text-align: center; }
 .lista-votaciones { display: flex; flex-direction: column; gap: 10px; }
-.opcion-voto { display: flex; justify-content: space-between; align-items: center; background: white; padding: 10px 15px; border-radius: 12px; border: 1px solid #cbd5e1; cursor: pointer; transition: all 0.2s; }
-.opcion-voto:active { transform: scale(0.98); }
-.opcion-voto.votado { border-color: #667eea; background: #eff6ff; }
-.opcion-texto { font-weight: bold; color: #334155; }
-.opcion-bar { font-size: 0.85rem; color: #64748b; display: flex; gap: 8px; align-items: center; }
-.voto-badge { background: #667eea; color: white; padding: 2px 8px; border-radius: 10px; font-weight: bold; }
+.opcion-voto {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: white;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1.5px solid #cbd5e1;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+.opcion-voto:active { transform: scale(0.99); }
+.opcion-voto.votado {
+  border-color: #6366f1;
+  background: #f5f3ff;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.12);
+}
+
+.opcion-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+}
+
+.opcion-texto {
+  font-weight: 800;
+  color: #1e293b;
+  font-size: 0.95rem;
+  line-height: 1.35;
+  flex: 1;
+}
+
+.plan-acciones-btns {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.btn-accion-plan {
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 4px 7px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.15s;
+  line-height: 1;
+}
+.btn-accion-plan:hover {
+  background: #e2e8f0;
+  transform: scale(1.08);
+}
+.btn-editar-plan:hover {
+  border-color: #3b82f6;
+  background: #eff6ff;
+}
+.btn-borrar-plan:hover {
+  border-color: #ef4444;
+  background: #fee2e2;
+}
+
+.opcion-bar {
+  font-size: 0.82rem;
+  color: #64748b;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  border-top: 1px dashed #e2e8f0;
+  padding-top: 6px;
+}
+
+.votantes-lista {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 75%;
+}
+
+.voto-badge {
+  background: #4f46e5;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 800;
+  font-size: 0.75rem;
+  flex-shrink: 0;
+}
+
+/* Modo oscuro para tarjetas de planes */
+body.dark-theme .opcion-header-row .opcion-texto { color: #f1f5f9; }
+body.dark-theme .btn-accion-plan { background: #334155; border-color: #475569; }
+body.dark-theme .opcion-bar { border-color: #334155; color: #94a3b8; }
 
 /* --- CHAT --- */
 .divisor { border: none; height: 2px; background: #e2e8f0; margin: 25px 0; }
