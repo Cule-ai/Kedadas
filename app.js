@@ -333,10 +333,17 @@ function concederAcceso(nombreUsuario, rolAdmin) {
   
   pantallaLogin.style.display = 'none'; 
   pantallaApp.style.display = 'block';
-  btnEditarUsuarios.style.display = 'inline-flex';
+  if (btnEditarUsuarios) btnEditarUsuarios.style.display = 'inline-flex';
   
   if (badgeUsuarioSesion) {
-    badgeUsuarioSesion.textContent = `👤 ${nombreUsuario} (${esAdmin ? 'Admin' : 'Miembro'})`;
+    badgeUsuarioSesion.textContent = `👤 ${nombreUsuario}`;
+  }
+  const perfilNombre = document.getElementById('perfil-nombre-conectado');
+  if (perfilNombre) perfilNombre.textContent = nombreUsuario;
+  const perfilRol = document.getElementById('perfil-rol-badge');
+  if (perfilRol) {
+    perfilRol.textContent = esAdmin ? 'Administrador' : 'Miembro';
+    perfilRol.className = esAdmin ? 'badge-rol-admin' : 'badge-rol-usuario';
   }
 
   renderizarSelector();
@@ -1032,10 +1039,13 @@ const btnGuardarCambiosHorario = document.getElementById('btn-guardar-cambios-ho
 const btnGuardarHorarioTop = document.getElementById('btn-guardar-horario-top');
 
 function actualizarBannerGrupo() {
-  if (nombreGrupoBanner) {
-    const grupoObj = listaGrupos.find(g => g.nombre.toLowerCase() === grupoActivo.toLowerCase());
-    nombreGrupoBanner.textContent = `${grupoObj?.icono || '👥'} ${grupoActivo}`;
-  }
+  const grupoObj = listaGrupos.find(g => g.nombre.toLowerCase() === grupoActivo.toLowerCase());
+  const texto = `${grupoObj?.icono || '👥'} ${grupoActivo}`;
+  if (nombreGrupoBanner) nombreGrupoBanner.textContent = texto;
+  const nombreGrupoBannerTab = document.getElementById('nombre-grupo-banner-tab');
+  if (nombreGrupoBannerTab) nombreGrupoBannerTab.textContent = texto;
+  const chatTituloGrupo = document.getElementById('chat-titulo-grupo');
+  if (chatTituloGrupo) chatTituloGrupo.textContent = `💬 Tablón de Avisos — ${grupoActivo}`;
 }
 
 async function cargarGruposDesdeBD() {
@@ -1058,15 +1068,38 @@ async function cargarGruposDesdeBD() {
 }
 
 function renderizarSelectorGrupos() {
-  if (!selectorGrupoActivo) return;
-  selectorGrupoActivo.innerHTML = '';
-  listaGrupos.forEach(g => {
-    const opt = document.createElement('option');
-    opt.value = g.nombre;
-    opt.textContent = `${g.icono || '👥'} ${g.nombre}`;
-    if (g.nombre.toLowerCase() === grupoActivo.toLowerCase()) opt.selected = true;
-    selectorGrupoActivo.appendChild(opt);
-  });
+  if (selectorGrupoActivo) {
+    selectorGrupoActivo.innerHTML = '';
+    listaGrupos.forEach(g => {
+      const opt = document.createElement('option');
+      opt.value = g.nombre;
+      opt.textContent = `${g.icono || '👥'} ${g.nombre}`;
+      if (g.nombre.toLowerCase() === grupoActivo.toLowerCase()) opt.selected = true;
+      selectorGrupoActivo.appendChild(opt);
+    });
+  }
+
+  // Renderizar tarjetas visuales de grupos en la pestaña Grupos
+  const contenedorTarjetas = document.getElementById('contenedor-tarjetas-grupos');
+  if (contenedorTarjetas) {
+    contenedorTarjetas.innerHTML = '';
+    listaGrupos.forEach(g => {
+      const esActivo = g.nombre.toLowerCase() === grupoActivo.toLowerCase();
+      const card = document.createElement('div');
+      card.className = `card-grupo-item ${esActivo ? 'activa' : ''}`;
+      card.innerHTML = `
+        <span class="card-grupo-icono">${g.icono || '👥'}</span>
+        <span class="card-grupo-nombre">${g.nombre}</span>
+        ${esActivo ? '<span class="badge-grupo-activo">Activo</span>' : ''}
+      `;
+      card.addEventListener('click', () => {
+        if (!esActivo) {
+          cambiarGrupo(g.nombre);
+        }
+      });
+      contenedorTarjetas.appendChild(card);
+    });
+  }
 }
 
 function cambiarGrupo(nuevoGrupo) {
@@ -2447,11 +2480,17 @@ const btnGuardarGeminiKey = document.getElementById('btn-guardar-gemini-key');
 const statusGeminiKey = document.getElementById('status-gemini-key');
 
 const dropZoneFoto = document.getElementById('drop-zone-foto');
-const inputFotoCuadrante = document.getElementById('input-foto-cuadrante');
-const btnElegirFoto = document.getElementById('btn-elegir-foto');
+const inputFotoCamara = document.getElementById('input-foto-camara');
+const inputFotoGaleria = document.getElementById('input-foto-galeria');
+const btnHacerFotoCamara = document.getElementById('btn-hacer-foto-camara');
+const btnAdjuntarArchivo = document.getElementById('btn-adjuntar-archivo');
 const wrapPreviewScan = document.getElementById('wrap-preview-scan');
 const previewFotoCuadrante = document.getElementById('preview-foto-cuadrante');
-const btnCambiarFoto = document.getElementById('btn-cambiar-foto');
+const previewPdfInfo = document.getElementById('preview-pdf-info');
+const previewPdfNombre = document.getElementById('preview-pdf-nombre');
+const btnCambiarCamara = document.getElementById('btn-cambiar-camara');
+const btnCambiarArchivo = document.getElementById('btn-cambiar-archivo');
+const chkAutollenarCalendario = document.getElementById('chk-autollenar-calendario');
 
 const scanConfigRow = document.getElementById('scan-config-row');
 const scanUsuarioObjetivo = document.getElementById('scan-usuario-objetivo');
@@ -2475,6 +2514,7 @@ const btnGuardarScan = document.getElementById('btn-guardar-scan');
 const STORAGE_GEMINI_KEY = 'kedadas_gemini_api_key';
 let imagenBase64Actual = '';
 let mimeTypeActual = 'image/jpeg';
+let nombreArchivoActual = '';
 let resultadoScanGlobal = null; // { modo: 'mes'|'ano', anio: 2026, meses: [ { mes: 0, nombreMes: 'Enero', dias: [] } ] }
 let mesActivoEnRevision = 0;
 
@@ -2516,7 +2556,7 @@ if (btnGuardarGeminiKey && inputGeminiKey) {
     if (val) {
       localStorage.setItem(STORAGE_GEMINI_KEY, val);
       actualizarEstadoClaveGemini();
-      alert('✅ ¡Clave de Google Gemini guardada con éxito! Ya puedes analizar tus fotos.');
+      alert('✅ ¡Clave de Google Gemini guardada con éxito! Ya puedes analizar tus fotos y PDFs.');
       if (boxConfigIA) boxConfigIA.style.display = 'none';
     } else {
       localStorage.removeItem(STORAGE_GEMINI_KEY);
@@ -2579,6 +2619,7 @@ if (btnAbrirScanFoto) {
     // Resetear estados visuales
     if (wrapPreviewScan) wrapPreviewScan.style.display = 'none';
     if (previewFotoCuadrante) { previewFotoCuadrante.src = ''; previewFotoCuadrante.style.display = 'none'; }
+    if (previewPdfInfo) previewPdfInfo.style.display = 'none';
     if (dropZoneFoto) {
       const cnt = dropZoneFoto.querySelector('.drop-zone-content');
       if (cnt) cnt.style.display = 'block';
@@ -2589,7 +2630,10 @@ if (btnAbrirScanFoto) {
     if (btnAnalizarFoto) btnAnalizarFoto.style.display = 'none';
     if (btnGuardarScan) btnGuardarScan.style.display = 'none';
     if (boxConfigIA) boxConfigIA.style.display = 'none';
+    if (inputFotoCamara) inputFotoCamara.value = '';
+    if (inputFotoGaleria) inputFotoGaleria.value = '';
     imagenBase64Actual = '';
+    nombreArchivoActual = '';
     resultadoScanGlobal = null;
 
     modalScanCuadrante.style.display = 'flex';
@@ -2607,18 +2651,46 @@ if (modalScanCuadrante) {
   });
 }
 
-// Selección de imagen por botón o arrastrar
-if (btnElegirFoto && inputFotoCuadrante) {
-  btnElegirFoto.addEventListener('click', (e) => {
+// Conexión de botones de selección: cámara directa vs selector de archivos/galería
+if (btnHacerFotoCamara && inputFotoCamara) {
+  btnHacerFotoCamara.addEventListener('click', (e) => {
     e.stopPropagation();
-    inputFotoCuadrante.click();
+    inputFotoCamara.click();
   });
-  dropZoneFoto.addEventListener('click', () => inputFotoCuadrante.click());
+}
+if (btnAdjuntarArchivo && inputFotoGaleria) {
+  btnAdjuntarArchivo.addEventListener('click', (e) => {
+    e.stopPropagation();
+    inputFotoGaleria.click();
+  });
+}
 
-  inputFotoCuadrante.addEventListener('change', (e) => {
+if (btnCambiarCamara && inputFotoCamara) {
+  btnCambiarCamara.addEventListener('click', (e) => {
+    e.stopPropagation();
+    inputFotoCamara.click();
+  });
+}
+if (btnCambiarArchivo && inputFotoGaleria) {
+  btnCambiarArchivo.addEventListener('click', (e) => {
+    e.stopPropagation();
+    inputFotoGaleria.click();
+  });
+}
+
+if (inputFotoCamara) {
+  inputFotoCamara.addEventListener('change', (e) => {
     if (e.target.files && e.target.files[0]) procesarArchivoImagen(e.target.files[0]);
   });
+}
+if (inputFotoGaleria) {
+  inputFotoGaleria.addEventListener('change', (e) => {
+    if (e.target.files && e.target.files[0]) procesarArchivoImagen(e.target.files[0]);
+  });
+}
 
+// Arrastrar y soltar archivos desde el ordenador
+if (dropZoneFoto) {
   dropZoneFoto.addEventListener('dragover', (e) => { e.preventDefault(); dropZoneFoto.style.borderColor = '#667eea'; });
   dropZoneFoto.addEventListener('dragleave', () => { dropZoneFoto.style.borderColor = '#cbd5e1'; });
   dropZoneFoto.addEventListener('drop', (e) => {
@@ -2630,32 +2702,49 @@ if (btnElegirFoto && inputFotoCuadrante) {
   });
 }
 
-if (btnCambiarFoto && inputFotoCuadrante) {
-  btnCambiarFoto.addEventListener('click', (e) => {
-    e.stopPropagation();
-    inputFotoCuadrante.click();
-  });
-}
-
 function procesarArchivoImagen(file) {
-  if (!file.type.startsWith('image/')) {
-    return alert('Por favor, selecciona un archivo de imagen válido (JPG, PNG, WEBP, etc.).');
+  if (!file) return;
+  const esImagen = file.type.startsWith('image/');
+  const esPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+
+  if (!esImagen && !esPdf) {
+    return alert('Por favor, selecciona una foto (JPG, PNG, WEBP) o un documento PDF de tu horario.');
   }
-  mimeTypeActual = file.type;
+
+  mimeTypeActual = esPdf ? 'application/pdf' : (file.type || 'image/jpeg');
+  nombreArchivoActual = file.name || (esPdf ? 'cuadrante.pdf' : 'cuadrante.jpg');
+
   const reader = new FileReader();
   reader.onload = (event) => {
     imagenBase64Actual = event.target.result;
-    if (previewFotoCuadrante) {
-      previewFotoCuadrante.src = imagenBase64Actual;
-      previewFotoCuadrante.style.display = 'inline-block';
+
+    if (esPdf) {
+      if (previewFotoCuadrante) previewFotoCuadrante.style.display = 'none';
+      if (previewPdfInfo) {
+        previewPdfInfo.style.display = 'flex';
+        if (previewPdfNombre) {
+          const tamKb = (file.size / 1024).toFixed(0);
+          previewPdfNombre.textContent = `${file.name} (${tamKb} KB)`;
+        }
+      }
+    } else {
+      if (previewPdfInfo) previewPdfInfo.style.display = 'none';
+      if (previewFotoCuadrante) {
+        previewFotoCuadrante.src = imagenBase64Actual;
+        previewFotoCuadrante.style.display = 'inline-block';
+      }
     }
+
     if (wrapPreviewScan) wrapPreviewScan.style.display = 'block';
     if (dropZoneFoto) {
       const cnt = dropZoneFoto.querySelector('.drop-zone-content');
       if (cnt) cnt.style.display = 'none';
     }
     if (scanConfigRow) scanConfigRow.style.display = 'block';
-    if (btnAnalizarFoto) btnAnalizarFoto.style.display = 'inline-block';
+    if (btnAnalizarFoto) {
+      btnAnalizarFoto.style.display = 'inline-block';
+      btnAnalizarFoto.textContent = '✨ Generar horario con IA y rellenar calendario';
+    }
     if (scanRevisionContainer) scanRevisionContainer.style.display = 'none';
     if (btnGuardarScan) btnGuardarScan.style.display = 'none';
   };
@@ -2664,18 +2753,18 @@ function procesarArchivoImagen(file) {
 
 // LLAMADA DIRECTA A GEMINI VISION DESDE EL NAVEGADOR
 async function llamarGeminiVisionNavegador(apiKey, base64, mimeType, modo, usuario, mes, anio) {
-  const cleanBase64 = base64.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '');
+  const cleanBase64 = base64.replace(/^data:[^;]+;base64,/, '');
   const mesNombre = (mes !== null && mes !== undefined) ? nombresMeses[mes] : '';
 
   const prompt = `
 Eres un digitalizador experto en cuadrantes de turnos laborales (sanidad, policía, emergencias, fábricas, bomberos, hostelería, etc.).
-Tu misión es extraer con total exactitud todos los turnos del trabajador/cuadrante en la imagen.
+Tu misión es extraer con total exactitud todos los turnos del trabajador/cuadrante en la imagen o documento PDF.
 
 CONTEXTO DE BÚSQUEDA:
 - Trabajador a extraer: "${usuario}". Si hay múltiples filas con nombres de personas, busca EXCLUSIVAMENTE la fila correspondiente a "${usuario}". Si no encuentras ese nombre específico o la tabla es para un solo trabajador/puesto, extrae el cuadrante principal visible.
 - Año de referencia: ${anio}.
-- Mes de referencia si aplica: ${mes !== null && mes !== undefined ? `${mes + 1} (${mesNombre})` : 'Detectar de la imagen'}.
-- Modo solicitado: "${modo}" (si es 'auto', analiza si la imagen contiene solo 1 mes o el año completo/múltiples meses).
+- Mes de referencia si aplica: ${mes !== null && mes !== undefined ? `${mes + 1} (${mesNombre})` : 'Detectar del documento'}.
+- Modo solicitado: "${modo}" (si es 'auto', analiza si el documento contiene solo 1 mes o el año completo/múltiples meses).
 
 CONVENCIÓN DE TURNOS PERMITIDOS:
 - "M": Turno de Mañana (ejemplos: M, M1, M2, 07:00-15:00, 08:00-15:00, Mañana).
@@ -2688,7 +2777,7 @@ CONVENCIÓN DE TURNOS PERMITIDOS:
 REGLAS DE FORMATO Y FECHAS:
 1. El campo "mes" DEBE ser un número entero de 0 a 11 (donde 0 = Enero, 1 = Febrero, ..., 11 = Diciembre).
 2. El campo "dia" DEBE ser el número del día (1 al 28/29/30/31 según el mes).
-3. Asegúrate de incluir todos los días del mes o de los meses presentes en la foto.
+3. Asegúrate de incluir todos los días del mes o de los meses presentes en el cuadrante.
 
 FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO NI MARKDOWN):
 {
@@ -2751,22 +2840,36 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO NI MARKDOWN):
   throw new Error(ultimoError || 'No se pudo contactar con los modelos de Gemini Vision.');
 }
 
-// Analizar la foto con Visión IA (Pipeline multinivel)
+// Analizar la foto o archivo con IA y rellenar automáticamente el calendario
 if (btnAnalizarFoto) {
   btnAnalizarFoto.addEventListener('click', async () => {
-    if (!imagenBase64Actual) return alert('Selecciona o fotografía un cuadrante primero.');
+    if (!imagenBase64Actual) {
+      return alert('Selecciona o fotografía un cuadrante primero (o adjunta un PDF o imagen existente).');
+    }
 
     const modoSeleccionado = document.querySelector('input[name="scan-modo"]:checked')?.value || 'auto';
     const mesSeleccionado = modoSeleccionado === 'mes' ? parseInt(scanMesObjetivo.value) : null;
     const anoSeleccionado = parseInt(scanAnoObjetivo.value) || fechaNavegacion.getFullYear();
     const usuarioObjetivo = scanUsuarioObjetivo ? scanUsuarioObjetivo.value : miUsuario;
 
+    let claveGeminiLocal = (localStorage.getItem(STORAGE_GEMINI_KEY) || '').trim();
+
+    // Si no hay clave, solicitarla amistosamente para no bloquear el flujo
+    if (!claveGeminiLocal) {
+      if (boxConfigIA) boxConfigIA.style.display = 'block';
+      const claveEntrada = prompt('🔑 Para digitalizar cuadrantes con IA introduce tu clave de Google Gemini (puedes conseguir una gratis en 30 segundos en Google AI Studio con tu cuenta de Google):\n\nVisita: aistudio.google.com/app/apikey', '');
+      if (claveEntrada && claveEntrada.trim()) {
+        claveGeminiLocal = claveEntrada.trim();
+        localStorage.setItem(STORAGE_GEMINI_KEY, claveGeminiLocal);
+        actualizarEstadoClaveGemini();
+      }
+    }
+
     btnAnalizarFoto.style.display = 'none';
     scanLoadingState.style.display = 'block';
     scanStatusText.textContent = 'Analizando cuadrante con IA de Visión...';
     scanStatusSub.textContent = 'Conectando con Google Gemini Vision...';
 
-    const claveGeminiLocal = (localStorage.getItem(STORAGE_GEMINI_KEY) || '').trim();
     let resultado = null;
 
     // NIVEL 1: Si hay clave local en el navegador, llamar directamente a Gemini API
@@ -2816,7 +2919,7 @@ if (btnAnalizarFoto) {
       }
     }
 
-    // NIVEL 3: Si no hay clave configurada o falló la conexión
+    // NIVEL 3: Si no se pudo procesar
     if (!resultado) {
       scanLoadingState.style.display = 'none';
       btnAnalizarFoto.style.display = 'inline-block';
@@ -2824,19 +2927,134 @@ if (btnAnalizarFoto) {
       if (!claveGeminiLocal) {
         if (boxConfigIA) boxConfigIA.style.display = 'block';
         if (inputGeminiKey) inputGeminiKey.focus();
-        alert('ℹ️ Para digitalizar cuadrantes con IA, introduce una clave gratuita de Google Gemini (se consigue gratis en 30 segundos en Google AI Studio con tu cuenta de Google). Arriba tienes el botón y el enlace.');
+        alert('ℹ️ Para digitalizar cuadrantes con IA necesitas una clave gratuita de Google Gemini.\nPuedes crearla gratis en 30 segundos en Google AI Studio (aistudio.google.com/app/apikey).');
         return;
       } else {
-        alert('❌ No se pudo analizar la imagen. Asegúrate de que la clave de Gemini es correcta y que la foto tiene buena iluminación y legibilidad.');
+        alert('❌ No se pudo analizar el cuadrante. Asegúrate de que la foto o PDF tiene buena legibilidad y que la clave de Gemini es válida.');
         return;
       }
     }
 
-    // Análisis exitoso: procesar y mostrar revisión
+    // Análisis exitoso: normalizar turnos
     scanLoadingState.style.display = 'none';
     resultadoScanGlobal = normalizarResultadoScan(resultado, anoSeleccionado);
-    renderizarRevisionScan();
+
+    // Si la opción de auto-llenar está activa (por defecto SÍ), volcar directo al calendario de la app
+    const autoLlenar = !chkAutollenarCalendario || chkAutollenarCalendario.checked;
+    if (autoLlenar) {
+      await aplicarTurnosDetectadosAlCalendario(resultadoScanGlobal, usuarioObjetivo);
+    } else {
+      // Si el usuario desactivó el auto-llenar, mostrar tabla interactiva para revisión manual
+      renderizarRevisionScan();
+    }
   });
+}
+
+// Función maestra: Aplica los turnos detectados de inmediato en LocalStorage, Supabase y el calendario visual
+async function aplicarTurnosDetectadosAlCalendario(resultadoScan, usuarioDestino) {
+  if (!resultadoScan || !resultadoScan.meses || resultadoScan.meses.length === 0) return;
+
+  const meses = resultadoScan.meses;
+  const anio = resultadoScan.anio;
+  const usuarioFinal = usuarioDestino || miUsuario;
+  let totalDias = 0;
+  const filasParaSupabase = [];
+
+  // 1. Guardar de inmediato en LocalStorage para cada mes detectado (sincrónico, cero esperas)
+  for (const mesObj of meses) {
+    const mesAnioKey = `${anio}-${mesObj.mes}`;
+    const keyLocal = `kedadas_turnos_${grupoActivo}_${usuarioFinal}_${mesAnioKey}`;
+    let turnosLocales = [];
+    try {
+      const raw = localStorage.getItem(keyLocal);
+      if (raw) turnosLocales = JSON.parse(raw);
+    } catch(e) {}
+
+    mesObj.dias.forEach(d => {
+      totalDias++;
+      const idx = turnosLocales.findIndex(t => t.dia === d.dia);
+      if (idx >= 0) {
+        turnosLocales[idx].indiceEstado = d.indiceEstado;
+      } else {
+        turnosLocales.push({
+          dia: d.dia,
+          usuario: usuarioFinal,
+          indiceEstado: d.indiceEstado,
+          mes_anio: mesAnioKey,
+          grupo: grupoActivo
+        });
+      }
+
+      filasParaSupabase.push({
+        dia: d.dia,
+        usuario: usuarioFinal,
+        indiceEstado: d.indiceEstado,
+        mes_anio: mesAnioKey,
+        grupo: grupoActivo
+      });
+    });
+
+    localStorage.setItem(keyLocal, JSON.stringify(turnosLocales));
+  }
+
+  // 2. Si el trabajador procesado no es el que estaba activo en pantalla, seleccionarlo
+  if (usuarioFinal && selectorUsuario && selectorUsuario.value !== usuarioFinal) {
+    miUsuario = usuarioFinal;
+    selectorUsuario.value = usuarioFinal;
+  }
+
+  // 3. Situar la fecha de navegación en el primer mes detectado
+  const primerMes = meses[0].mes;
+  fechaNavegacion = new Date(anio, primerMes, 1);
+
+  // 4. Si fue el año completo (>1 mes), cambiar la vista o mantenerse en mes
+  if (meses.length > 1) {
+    modoVista = 'ano';
+    if (btnToggleVista) btnToggleVista.textContent = '📅 Cambiar a Vista Mensual';
+  } else {
+    modoVista = 'mes';
+    if (btnToggleVista) btnToggleVista.textContent = '📅 Cambiar a Vista Anual';
+  }
+
+  // 5. Iniciar y pintar el calendario visualmente de forma instantánea
+  await iniciarCalendario();
+
+  // 6. Cerrar el modal para que el usuario disfrute de su calendario ya relleno
+  if (modalScanCuadrante) modalScanCuadrante.style.display = 'none';
+
+  // 7. Lanzar animación de confeti
+  if (typeof confetti === 'function') {
+    confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
+  }
+
+  // 8. Mensaje de confirmación
+  const nombreMes = meses[0].nombreMes;
+  const mensajeConfirmacion = meses.length > 1
+    ? `🎉 ¡Horario volcado automáticamente en tu calendario!\nSe han rellenado ${totalDias} días del año ${anio} para ${usuarioFinal}.`
+    : `🎉 ¡Horario volcado automáticamente en tu calendario!\nSe han rellenado ${totalDias} turnos de ${nombreMes} ${anio} para ${usuarioFinal}.`;
+
+  setTimeout(() => { alert(mensajeConfirmacion); }, 150);
+
+  // 9. Sincronizar en segundo plano con Supabase en bloques de lote (upsert)
+  guardarTurnosEnLote(filasParaSupabase);
+}
+
+// Sincronización en bloque (batch upsert) con Supabase para máxima velocidad
+async function guardarTurnosEnLote(filas) {
+  if (!filas || filas.length === 0) return;
+  try {
+    const BLOQUE = 80;
+    for (let i = 0; i < filas.length; i += BLOQUE) {
+      const chunk = filas.slice(i, i + BLOQUE);
+      let res = await supabaseApp.from('Turnos').upsert(chunk, { onConflict: 'usuario,dia,mes_anio' });
+      if (res.error && res.error.message && res.error.message.includes('grupo')) {
+        const chunkSinGrupo = chunk.map(({ grupo, ...resto }) => resto);
+        await supabaseApp.from('Turnos').upsert(chunkSinGrupo, { onConflict: 'usuario,dia,mes_anio' });
+      }
+    }
+  } catch (err) {
+    console.warn('Aviso sincronizando turnos en Supabase:', err);
+  }
 }
 
 function normalizarResultadoScan(res, anioFallback) {
@@ -2993,68 +3211,84 @@ function pintarDiasDelMesEnRevision() {
   });
 }
 
-// Guardar los turnos detectados (mes o año completo)
+// Guardar manual desde la tabla de revisión
 if (btnGuardarScan) {
   btnGuardarScan.addEventListener('click', async () => {
     if (!resultadoScanGlobal || !resultadoScanGlobal.meses) return;
-
-    const meses = resultadoScanGlobal.meses;
-    const anio = resultadoScanGlobal.anio;
     const usuarioDestino = scanUsuarioObjetivo ? scanUsuarioObjetivo.value : miUsuario;
-
-    let totalDiasAGuardar = 0;
-    meses.forEach(m => { totalDiasAGuardar += m.dias.length; });
-
-    const seguro = confirm(`¿Estás seguro de que deseas guardar los ${totalDiasAGuardar} turnos detectados para "${usuarioDestino}" en el grupo "${grupoActivo}"?`);
-    if (!seguro) return;
-
-    btnGuardarScan.disabled = true;
-    btnGuardarScan.textContent = '⏳ Guardando turnos...';
-
-    try {
-      let guardadosCount = 0;
-      for (const mesObj of meses) {
-        const mesAnioKey = `${anio}-${mesObj.mes}`;
-        for (const d of mesObj.dias) {
-          await guardarTurnoNube(d.dia, d.indiceEstado, mesAnioKey);
-          guardadosCount++;
-          if (guardadosCount % 20 === 0) {
-            btnGuardarScan.textContent = `⏳ Guardando (${guardadosCount}/${totalDiasAGuardar})...`;
-          }
-        }
-      }
-
-      modalScanCuadrante.style.display = 'none';
-
-      // Navegar al primer mes detectado
-      const primerMes = meses[0].mes;
-      fechaNavegacion = new Date(anio, primerMes, 1);
-      
-      // Si fue anual, alternar a vista anual si se prefiere o recargar calendario
-      if (meses.length > 1 && modoVista === 'mes') {
-        // Mostrar confirmación para ir a vista anual
-        if (confirm(`🎉 ¡Cuadrante completo de ${anio} guardado con éxito! ¿Deseas ver la vista anual?`)) {
-          btnToggleVista.click();
-        } else {
-          await iniciarCalendario();
-        }
-      } else {
-        await iniciarCalendario();
-        alert(`🎉 ¡Horario volcado con éxito en tu cuadrante de ${meses[0].nombreMes} ${anio}!`);
-      }
-    } catch (err) {
-      alert('Error al guardar el cuadrante: ' + err.message);
-    } finally {
-      btnGuardarScan.disabled = false;
-      btnGuardarScan.textContent = '💾 Guardar en mi cuadrante';
-    }
+    await aplicarTurnosDetectadosAlCalendario(resultadoScanGlobal, usuarioDestino);
   });
+}
+
+// =========================================================================
+// --- NAVEGACIÓN LIMPIA POR PESTAÑAS (CUADRANTE, PLANES, CHAT, GRUPOS, USUARIOS)
+// =========================================================================
+function inicializarNavegacionPestanas() {
+  const tabBtns = document.querySelectorAll('.nav-tab-btn');
+  const tabPanes = document.querySelectorAll('.tab-pane');
+  const btnTopGrupo = document.getElementById('btn-top-grupo-pill');
+  const btnTopUser = document.getElementById('btn-top-user-pill');
+
+  function cambiarPestana(tabName) {
+    tabBtns.forEach(btn => {
+      btn.classList.toggle('activo', btn.dataset.tab === tabName);
+    });
+
+    tabPanes.forEach(pane => {
+      const coincide = pane.id === `tab-${tabName}`;
+      pane.style.display = coincide ? 'block' : 'none';
+    });
+
+    // Acciones específicas al activar cada pestaña
+    if (tabName === 'planes') {
+      pintarPlanesEnPantalla();
+    } else if (tabName === 'chat') {
+      if (typeof scrollChatAlFinal === 'function') scrollChatAlFinal();
+    } else if (tabName === 'grupos') {
+      renderizarSelectorGrupos();
+    } else if (tabName === 'usuarios') {
+      poblarEditorPersonaDesplegable();
+    } else if (tabName === 'cuadrante') {
+      iniciarCalendario();
+    }
+  }
+
+  tabBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      cambiarPestana(btn.dataset.tab);
+    });
+  });
+
+  if (btnTopGrupo) {
+    btnTopGrupo.addEventListener('click', () => cambiarPestana('grupos'));
+  }
+  if (btnTopUser) {
+    btnTopUser.addEventListener('click', () => cambiarPestana('usuarios'));
+  }
+
+  // Soporte para botón rápido de personas
+  const btnTopPersonas = document.getElementById('btn-top-personas');
+  if (btnTopPersonas) {
+    btnTopPersonas.addEventListener('click', () => cambiarPestana('usuarios'));
+  }
+
+  // Conectar botón de clave Gemini en la pestaña de usuarios
+  const btnToggleConfigIATab = document.getElementById('btn-toggle-config-ia-tab');
+  if (btnToggleConfigIATab) {
+    btnToggleConfigIATab.addEventListener('click', () => {
+      if (btnAbrirScanFoto) btnAbrirScanFoto.click();
+      if (btnToggleConfigIA) setTimeout(() => btnToggleConfigIA.click(), 100);
+    });
+  }
 }
 
 // =========================================================================
 // --- 13. INICIALIZACIÓN Y RESTAURACIÓN AUTOMÁTICA DE SESIÓN --------------
 // =========================================================================
 window.addEventListener('DOMContentLoaded', async () => {
+  // Inicializar navegación por pestañas limpias
+  inicializarNavegacionPestanas();
+
   // Cargar lista dinámica de usuarios y grupos desde Supabase
   await cargarGruposDesdeBD();
   await cargarUsuariosDesdeBD();

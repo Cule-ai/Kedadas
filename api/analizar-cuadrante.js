@@ -40,8 +40,8 @@ export default async function handler(req, res) {
       });
     }
 
-    // Limpiar base64 si contiene prefijo data URL
-    const cleanBase64 = imageBase64.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '');
+    // Limpiar base64 si contiene prefijo data URL (imágenes o PDF)
+    const cleanBase64 = imageBase64.replace(/^data:[^;]+;base64,/, '');
 
     const mesNombreReferencia = (mes !== null && mes !== undefined)
       ? ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'][mes] || ''
