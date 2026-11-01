@@ -1,5 +1,5 @@
 // Service Worker para Kedadas PWA
-const CACHE_NAME = 'kedadas-cache-v11';
+const CACHE_NAME = 'kedadas-cache-v12';
 const STATIC_ASSETS = [
   './',
   './index.html',

@@ -3136,6 +3136,42 @@ if (btnGuardarGeminiKey && inputGeminiKey) {
   });
 }
 
+// Botón para probar la validez de la clave Gemini al instante
+const btnProbarGeminiKey = document.getElementById('btn-probar-gemini-key');
+if (btnProbarGeminiKey && inputGeminiKey) {
+  btnProbarGeminiKey.addEventListener('click', async () => {
+    const clave = (inputGeminiKey.value || localStorage.getItem(STORAGE_GEMINI_KEY) || '').trim();
+    if (!clave) {
+      return alert('Pega primero tu clave de Google Gemini para probarla.');
+    }
+    btnProbarGeminiKey.textContent = '⏳ Probando...';
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${clave}`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: 'Di únicamente: OK' }] }]
+        })
+      });
+      const data = await res.json();
+      btnProbarGeminiKey.textContent = '🧪 Probar';
+      if (res.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
+        localStorage.setItem(STORAGE_GEMINI_KEY, clave);
+        actualizarEstadoClaveGemini();
+        if (typeof confetti === 'function') confetti({ particleCount: 35, spread: 60 });
+        alert('🎉 ¡Tu clave de Google Gemini es 100% VÁLIDA y está conectada con Google AI Studio!\nYa está guardada para todos tus escaneos.');
+      } else {
+        const errorMsg = data.error?.message || (data.error ? JSON.stringify(data.error) : 'Respuesta desconocida de Google');
+        alert(`❌ La clave de Gemini no funcionó.\n\nMotivo exacto devuelto por Google:\n${errorMsg}\n\nAsegúrate de copiar la clave entera de aistudio.google.com/app/apikey.`);
+      }
+    } catch (e) {
+      btnProbarGeminiKey.textContent = '🧪 Probar';
+      alert(`❌ Error de conexión al probar la clave:\n${e.message}\n\nComprueba tu conexión a internet o si hay algún bloqueador de red.`);
+    }
+  });
+}
+
 // Inicializar selectores de mes, año y personas en el modal de escaneo
 function poblarSelectoresScan() {
   if (scanMesObjetivo) {
@@ -3274,37 +3310,16 @@ if (dropZoneFoto) {
 
 function procesarArchivoImagen(file) {
   if (!file) return;
-  const esImagen = file.type.startsWith('image/');
   const esPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+  const esImagen = file.type.startsWith('image/') || (!esPdf && /\.(jpe?g|png|webp|heic|heif|bmp)$/i.test(file.name));
 
   if (!esImagen && !esPdf) {
     return alert('Por favor, selecciona una foto (JPG, PNG, WEBP) o un documento PDF de tu horario.');
   }
 
-  mimeTypeActual = esPdf ? 'application/pdf' : (file.type || 'image/jpeg');
   nombreArchivoActual = file.name || (esPdf ? 'cuadrante.pdf' : 'cuadrante.jpg');
 
-  const reader = new FileReader();
-  reader.onload = (event) => {
-    imagenBase64Actual = event.target.result;
-
-    if (esPdf) {
-      if (previewFotoCuadrante) previewFotoCuadrante.style.display = 'none';
-      if (previewPdfInfo) {
-        previewPdfInfo.style.display = 'flex';
-        if (previewPdfNombre) {
-          const tamKb = (file.size / 1024).toFixed(0);
-          previewPdfNombre.textContent = `${file.name} (${tamKb} KB)`;
-        }
-      }
-    } else {
-      if (previewPdfInfo) previewPdfInfo.style.display = 'none';
-      if (previewFotoCuadrante) {
-        previewFotoCuadrante.src = imagenBase64Actual;
-        previewFotoCuadrante.style.display = 'inline-block';
-      }
-    }
-
+  function mostrarConfiguracionScan() {
     if (wrapPreviewScan) wrapPreviewScan.style.display = 'block';
     if (dropZoneFoto) {
       const cnt = dropZoneFoto.querySelector('.drop-zone-content');
@@ -3317,12 +3332,77 @@ function procesarArchivoImagen(file) {
     }
     if (scanRevisionContainer) scanRevisionContainer.style.display = 'none';
     if (btnGuardarScan) btnGuardarScan.style.display = 'none';
+  }
+
+  if (esPdf) {
+    mimeTypeActual = 'application/pdf';
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      imagenBase64Actual = event.target.result;
+      if (previewFotoCuadrante) previewFotoCuadrante.style.display = 'none';
+      if (previewPdfInfo) {
+        previewPdfInfo.style.display = 'flex';
+        if (previewPdfNombre) {
+          const tamKb = (file.size / 1024).toFixed(0);
+          previewPdfNombre.textContent = `${file.name} (${tamKb} KB)`;
+        }
+      }
+      mostrarConfiguracionScan();
+    };
+    reader.readAsDataURL(file);
+    return;
+  }
+
+  // Si es imagen: comprimir con canvas a máx 1600px y formato JPEG para compatibilidad y ligereza
+  mimeTypeActual = 'image/jpeg';
+  const reader = new FileReader();
+  reader.onload = (event) => {
+    const rawData = event.target.result;
+    const img = new Image();
+    img.onload = () => {
+      const maxDim = 1600;
+      let w = img.width;
+      let h = img.height;
+      if (w > maxDim || h > maxDim) {
+        if (w > h) {
+          h = Math.round((h * maxDim) / w);
+          w = maxDim;
+        } else {
+          w = Math.round((w * maxDim) / h);
+          h = maxDim;
+        }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      imagenBase64Actual = canvas.toDataURL('image/jpeg', 0.85);
+
+      if (previewPdfInfo) previewPdfInfo.style.display = 'none';
+      if (previewFotoCuadrante) {
+        previewFotoCuadrante.src = imagenBase64Actual;
+        previewFotoCuadrante.style.display = 'inline-block';
+      }
+      mostrarConfiguracionScan();
+    };
+    img.onerror = () => {
+      imagenBase64Actual = rawData;
+      if (previewPdfInfo) previewPdfInfo.style.display = 'none';
+      if (previewFotoCuadrante) {
+        previewFotoCuadrante.src = imagenBase64Actual;
+        previewFotoCuadrante.style.display = 'inline-block';
+      }
+      mostrarConfiguracionScan();
+    };
+    img.src = rawData;
   };
   reader.readAsDataURL(file);
 }
 
 // LLAMADA DIRECTA A GEMINI VISION DESDE EL NAVEGADOR
 async function llamarGeminiVisionNavegador(apiKey, base64, mimeType, modo, usuario, mes, anio) {
+  const cleanKey = (apiKey || '').trim().replace(/^['"]|['"]$/g, '');
   const cleanBase64 = base64.replace(/^data:[^;]+;base64,/, '');
   const mesNombre = (mes !== null && mes !== undefined) ? nombresMeses[mes] : '';
 
@@ -3368,12 +3448,12 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO NI MARKDOWN):
 }
 `;
 
-  const modelos = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro'];
+  const modelos = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-1.5-pro'];
   let ultimoError = null;
 
   for (const modelo of modelos) {
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${apiKey}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${cleanKey}`;
       const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3381,7 +3461,7 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO NI MARKDOWN):
           contents: [{
             parts: [
               { text: prompt },
-              { inline_data: { mime_type: mimeType, data: cleanBase64 } }
+              { inline_data: { mime_type: mimeType || 'image/jpeg', data: cleanBase64 } }
             ]
           }],
           generationConfig: {
@@ -3400,7 +3480,7 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO NI MARKDOWN):
           return parsed;
         }
       } else {
-        ultimoError = data.error?.message || 'Error en respuesta de Gemini';
+        ultimoError = data.error?.message || (data.error ? JSON.stringify(data.error) : `Error ${res.status}`);
       }
     } catch (e) {
       ultimoError = e.message;
@@ -3441,6 +3521,7 @@ if (btnAnalizarFoto) {
     scanStatusSub.textContent = 'Conectando con Google Gemini Vision...';
 
     let resultado = null;
+    let ultimoErrorDetalle = '';
 
     // NIVEL 1: Si hay clave local en el navegador, llamar directamente a Gemini API
     if (claveGeminiLocal) {
@@ -3457,6 +3538,7 @@ if (btnAnalizarFoto) {
         );
       } catch (errDirect) {
         console.warn('Fallo llamada directa a Gemini con clave local:', errDirect);
+        ultimoErrorDetalle = errDirect.message || 'Error en Gemini Vision';
       }
     }
 
@@ -3483,9 +3565,17 @@ if (btnAnalizarFoto) {
           if (dataServ && Array.isArray(dataServ.meses) && dataServ.meses.length > 0) {
             resultado = dataServ;
           }
+        } else {
+          try {
+            const errServJson = await resServidor.json();
+            if (errServJson.message || errServJson.error) {
+              ultimoErrorDetalle = errServJson.message || errServJson.error;
+            }
+          } catch(e) {}
         }
       } catch (errServ) {
         console.warn('Fallo consulta a /api/analizar-cuadrante:', errServ);
+        if (!ultimoErrorDetalle) ultimoErrorDetalle = errServ.message;
       }
     }
 
@@ -3497,10 +3587,19 @@ if (btnAnalizarFoto) {
       if (!claveGeminiLocal) {
         if (boxConfigIA) boxConfigIA.style.display = 'block';
         if (inputGeminiKey) inputGeminiKey.focus();
-        alert('ℹ️ Para digitalizar cuadrantes con IA necesitas una clave gratuita de Google Gemini.\nPuedes crearla gratis en 30 segundos en Google AI Studio (aistudio.google.com/app/apikey).');
+        alert('ℹ️ Para digitalizar cuadrantes con IA necesitas una clave gratuita de Google Gemini.\n\nPulsa en "⚙️ Clave IA" arriba para guardarla (puedes crearla gratis en 30 segundos en Google AI Studio: aistudio.google.com/app/apikey).');
         return;
       } else {
-        alert('❌ No se pudo analizar el cuadrante. Asegúrate de que la foto o PDF tiene buena legibilidad y que la clave de Gemini es válida.');
+        const errorLower = (ultimoErrorDetalle || '').toLowerCase();
+        if (errorLower.includes('api_key_invalid') || errorLower.includes('api key not valid') || errorLower.includes('invalid api key')) {
+          if (boxConfigIA) boxConfigIA.style.display = 'block';
+          if (inputGeminiKey) inputGeminiKey.focus();
+          alert(`❌ La clave de Gemini guardada no es válida.\n\nMotivo de Google:\n${ultimoErrorDetalle}\n\nPor favor, abre "⚙️ Clave IA" arriba y pega tu clave correcta de aistudio.google.com/app/apikey.`);
+        } else if (errorLower.includes('resource_exhausted') || errorLower.includes('quota')) {
+          alert(`⏳ Límite de consultas gratuitas de Gemini alcanzado.\n\nGoogle AI Studio permite 15 consultas por minuto en la capa gratuita. Espera 1 minuto y vuelve a pulsar "Generar horario".`);
+        } else {
+          alert(`❌ No se pudo analizar el cuadrante.\n\nDetalle del error:\n${ultimoErrorDetalle || 'Comprueba la legibilidad de la imagen y la clave de Gemini.'}\n\nConsejo: Si la clave tiene algún error o no estás seguro, pulsa "⚙️ Clave IA" arriba para revisarla o pulsar el botón "🧪 Probar".`);
+        }
         return;
       }
     }

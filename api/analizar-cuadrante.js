@@ -89,8 +89,8 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO ADICIONAL):
 }
 `;
 
-    // Intentar con gemini-1.5-flash y fallback a gemini-2.0-flash si procede
-    const modelos = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro'];
+    // Intentar con gemini-1.5-flash y fallback a gemini-2.0-flash, gemini-2.5-flash o pro
+    const modelos = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-1.5-pro'];
     let respuestaFinal = null;
     let ultimoError = null;
 
