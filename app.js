@@ -3136,7 +3136,56 @@ if (btnGuardarGeminiKey && inputGeminiKey) {
   });
 }
 
-// Botón para probar la validez de la clave Gemini al instante
+// Detectar y listar dinámicamente los modelos de Gemini disponibles para la clave del usuario
+async function obtenerModelosGeminiDisponibles(apiKey) {
+  const cleanKey = (apiKey || '').trim();
+  const preferencia = [
+    'gemini-2.0-flash',
+    'gemini-1.5-flash-latest',
+    'gemini-1.5-flash-002',
+    'gemini-1.5-flash',
+    'gemini-2.5-flash',
+    'gemini-1.5-pro',
+    'gemini-pro'
+  ];
+
+  if (!cleanKey) return preferencia;
+
+  try {
+    // Consultar ModelService.ListModels para averiguar exactamente qué modelos admite la clave
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${cleanKey}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data.models) && data.models.length > 0) {
+        const disponibles = data.models
+          .filter(m => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent'))
+          .map(m => m.name.replace(/^models\//, ''));
+
+        if (disponibles.length > 0) {
+          const ordenados = [];
+          for (const pref of preferencia) {
+            const encontrado = disponibles.find(d => d === pref || d.startsWith(pref));
+            if (encontrado && !ordenados.includes(encontrado)) {
+              ordenados.push(encontrado);
+            }
+          }
+          for (const d of disponibles) {
+            if (!ordenados.includes(d)) {
+              ordenados.push(d);
+            }
+          }
+          return ordenados;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('Consulta dynamic ListModels falló, usando lista predeterminada:', e);
+  }
+
+  return preferencia;
+}
+
+// Botón para probar la validez de la clave Gemini al instante con auto-detección
 const btnProbarGeminiKey = document.getElementById('btn-probar-gemini-key');
 if (btnProbarGeminiKey && inputGeminiKey) {
   btnProbarGeminiKey.addEventListener('click', async () => {
@@ -3146,24 +3195,48 @@ if (btnProbarGeminiKey && inputGeminiKey) {
     }
     btnProbarGeminiKey.textContent = '⏳ Probando...';
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${clave}`;
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: 'Di únicamente: OK' }] }]
-        })
-      });
-      const data = await res.json();
+      const modelos = await obtenerModelosGeminiDisponibles(clave);
+      let exito = false;
+      let modeloFuncional = '';
+      let ultimoError = '';
+
+      for (const modelo of modelos) {
+        const versiones = ['v1beta', 'v1'];
+        for (const vApi of versiones) {
+          try {
+            const url = `https://generativelanguage.googleapis.com/${vApi}/models/${modelo}:generateContent?key=${clave}`;
+            const res = await fetch(url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{ parts: [{ text: 'Di únicamente: OK' }] }]
+              })
+            });
+            const data = await res.json();
+            if (res.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
+              exito = true;
+              modeloFuncional = `${modelo} (${vApi})`;
+              break;
+            } else {
+              ultimoError = data.error?.message || (data.error ? JSON.stringify(data.error) : 'Respuesta desconocida de Google');
+              if (res.status === 404) break; // Probar siguiente modelo si este no existe en este endpoint
+            }
+          } catch (e) {
+            ultimoError = e.message;
+          }
+        }
+        if (exito) break;
+      }
+
       btnProbarGeminiKey.textContent = '🧪 Probar';
-      if (res.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
+
+      if (exito) {
         localStorage.setItem(STORAGE_GEMINI_KEY, clave);
         actualizarEstadoClaveGemini();
         if (typeof confetti === 'function') confetti({ particleCount: 35, spread: 60 });
-        alert('🎉 ¡Tu clave de Google Gemini es 100% VÁLIDA y está conectada con Google AI Studio!\nYa está guardada para todos tus escaneos.');
+        alert(`🎉 ¡Tu clave de Google Gemini es 100% VÁLIDA y funciona a la perfección!\n\nModelo activo detectado: ${modeloFuncional}\nYa está guardada para todos tus escaneos automáticos.`);
       } else {
-        const errorMsg = data.error?.message || (data.error ? JSON.stringify(data.error) : 'Respuesta desconocida de Google');
-        alert(`❌ La clave de Gemini no funcionó.\n\nMotivo exacto devuelto por Google:\n${errorMsg}\n\nAsegúrate de copiar la clave entera de aistudio.google.com/app/apikey.`);
+        alert(`❌ La clave de Gemini no funcionó.\n\nMotivo exacto devuelto por Google:\n${ultimoError}\n\nAsegúrate de copiar la clave entera de aistudio.google.com/app/apikey.`);
       }
     } catch (e) {
       btnProbarGeminiKey.textContent = '🧪 Probar';
@@ -3448,42 +3521,51 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO NI MARKDOWN):
 }
 `;
 
-  const modelos = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-1.5-pro'];
+  // Obtener lista inteligente de modelos compatibles con generateContent
+  let modelos = await obtenerModelosGeminiDisponibles(cleanKey);
+  if (!modelos || modelos.length === 0) {
+    modelos = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash-002', 'gemini-1.5-flash', 'gemini-2.5-flash', 'gemini-1.5-pro'];
+  }
   let ultimoError = null;
 
   for (const modelo of modelos) {
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${cleanKey}`;
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{
-            parts: [
-              { text: prompt },
-              { inline_data: { mime_type: mimeType || 'image/jpeg', data: cleanBase64 } }
-            ]
-          }],
-          generationConfig: {
-            response_mime_type: 'application/json',
-            temperature: 0.1,
-            max_output_tokens: 8192
-          }
-        })
-      });
+    const versionesApi = ['v1beta', 'v1'];
+    for (const vApi of versionesApi) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/${vApi}/models/${modelo}:generateContent?key=${cleanKey}`;
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{
+              parts: [
+                { text: prompt },
+                { inline_data: { mime_type: mimeType || 'image/jpeg', data: cleanBase64 } }
+              ]
+            }],
+            generationConfig: {
+              response_mime_type: 'application/json',
+              temperature: 0.1,
+              max_output_tokens: 8192
+            }
+          })
+        });
 
-      const data = await res.json();
-      if (res.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
-        const rawJson = data.candidates[0].content.parts[0].text;
-        const parsed = JSON.parse(rawJson);
-        if (parsed && Array.isArray(parsed.meses) && parsed.meses.length > 0) {
-          return parsed;
+        const data = await res.json();
+        if (res.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
+          const rawJson = data.candidates[0].content.parts[0].text;
+          const parsed = JSON.parse(rawJson);
+          if (parsed && Array.isArray(parsed.meses) && parsed.meses.length > 0) {
+            console.log(`✅ Cuadrante analizado con éxito usando modelo ${modelo} (${vApi})`);
+            return parsed;
+          }
+        } else {
+          ultimoError = data.error?.message || (data.error ? JSON.stringify(data.error) : `Error ${res.status}`);
+          if (res.status === 404) break; // Probar siguiente modelo
         }
-      } else {
-        ultimoError = data.error?.message || (data.error ? JSON.stringify(data.error) : `Error ${res.status}`);
+      } catch (e) {
+        ultimoError = e.message;
       }
-    } catch (e) {
-      ultimoError = e.message;
     }
   }
 

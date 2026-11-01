@@ -89,51 +89,56 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO ADICIONAL):
 }
 `;
 
-    // Intentar con gemini-1.5-flash y fallback a gemini-2.0-flash, gemini-2.5-flash o pro
-    const modelos = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-1.5-pro'];
+    // Intentar con gemini-2.0-flash, gemini-1.5-flash-latest y fallback a v1beta/v1
+    const modelos = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash-002', 'gemini-1.5-flash', 'gemini-2.5-flash', 'gemini-1.5-pro'];
     let respuestaFinal = null;
     let ultimoError = null;
 
     for (const modelo of modelos) {
-      try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${geminiKey}`;
-        const geminiRes = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{
-              parts: [
-                { text: promptInstrucciones },
-                {
-                  inline_data: {
-                    mime_type: mimeType,
-                    data: cleanBase64
+      const versiones = ['v1beta', 'v1'];
+      for (const vApi of versiones) {
+        try {
+          const url = `https://generativelanguage.googleapis.com/${vApi}/models/${modelo}:generateContent?key=${geminiKey}`;
+          const geminiRes = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{
+                parts: [
+                  { text: promptInstrucciones },
+                  {
+                    inline_data: {
+                      mime_type: mimeType,
+                      data: cleanBase64
+                    }
                   }
-                }
-              ]
-            }],
-            generationConfig: {
-              response_mime_type: 'application/json',
-              temperature: 0.1,
-              max_output_tokens: 8192
-            }
-          })
-        });
+                ]
+              }],
+              generationConfig: {
+                response_mime_type: 'application/json',
+                temperature: 0.1,
+                max_output_tokens: 8192
+              }
+            })
+          });
 
-        const data = await geminiRes.json();
-        if (geminiRes.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
-          const rawJson = data.candidates[0].content.parts[0].text;
-          const parsed = JSON.parse(rawJson);
-          if (parsed && Array.isArray(parsed.meses) && parsed.meses.length > 0) {
-            respuestaFinal = parsed;
-            break;
+          const data = await geminiRes.json();
+          if (geminiRes.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
+            const rawJson = data.candidates[0].content.parts[0].text;
+            const parsed = JSON.parse(rawJson);
+            if (parsed && Array.isArray(parsed.meses) && parsed.meses.length > 0) {
+              respuestaFinal = parsed;
+              break;
+            }
+          } else {
+            ultimoError = data.error?.message || 'Respuesta inválida de Gemini';
+            if (geminiRes.status === 404) break; // Probar siguiente modelo
           }
-        } else {
-          ultimoError = data.error?.message || 'Respuesta inválida de Gemini';
+        } catch (err) {
+          ultimoError = err.message;
         }
-      } catch (err) {
-        ultimoError = err.message;
       }
+      if (respuestaFinal) break;
     }
 
     if (!respuestaFinal) {
