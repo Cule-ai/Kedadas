@@ -346,6 +346,8 @@ function concederAcceso(nombreUsuario, rolAdmin) {
     perfilRol.className = esAdmin ? 'badge-rol-admin' : 'badge-rol-usuario';
   }
 
+  renderizarSelectorGrupos();
+  renderizarPanelGestionGrupoActivo();
   renderizarSelector();
   actualizarBannerGrupo();
   iniciarCalendario();
@@ -491,18 +493,26 @@ function renderizarSelectoresUsuarios() {
     if (usuarios.includes(valActual)) loginUsuario.value = valActual;
   }
 
-  // Selector en pantalla principal de la app
+  // Selector en pantalla principal de la app (Solo miembros del grupo activo)
   if (selectorUsuario) {
     const valActual = selectorUsuario.value;
     selectorUsuario.innerHTML = '';
-    usuarios.forEach(u => {
+    const miembrosGrupo = (typeof obtenerMiembrosGrupo === 'function') ? obtenerMiembrosGrupo(grupoActivo) : usuarios;
+    miembrosGrupo.forEach(u => {
       const opt = document.createElement('option');
       opt.value = u;
       opt.textContent = u;
       selectorUsuario.appendChild(opt);
     });
-    if (usuarios.includes(miUsuario)) selectorUsuario.value = miUsuario;
-    else if (usuarios.includes(valActual)) selectorUsuario.value = valActual;
+    if (miembrosGrupo.includes(miUsuario)) {
+      selectorUsuario.value = miUsuario;
+    } else if (miembrosGrupo.includes(valActual)) {
+      selectorUsuario.value = valActual;
+      miUsuario = valActual;
+    } else if (miembrosGrupo.length > 0) {
+      selectorUsuario.value = miembrosGrupo[0];
+      miUsuario = miembrosGrupo[0];
+    }
   }
 
   // Selector en el panel desplegable de edición
@@ -762,14 +772,16 @@ function renderizarFiltroCoincidencias() {
   if (!listaFiltroCoincidencias) return;
   listaFiltroCoincidencias.innerHTML = '';
   
+  const miembrosGrupo = (typeof obtenerMiembrosGrupo === 'function') ? obtenerMiembrosGrupo(grupoActivo) : usuarios;
+
   usuariosSeleccionadosCoincidencias = new Set(
-    [...usuariosSeleccionadosCoincidencias].filter(u => usuarios.includes(u))
+    [...usuariosSeleccionadosCoincidencias].filter(u => miembrosGrupo.includes(u))
   );
   if (usuariosSeleccionadosCoincidencias.size === 0) {
-    usuarios.forEach(u => usuariosSeleccionadosCoincidencias.add(u));
+    miembrosGrupo.forEach(u => usuariosSeleccionadosCoincidencias.add(u));
   }
 
-  usuarios.forEach(u => {
+  miembrosGrupo.forEach(u => {
     const isActivo = usuariosSeleccionadosCoincidencias.has(u);
     const label = document.createElement('label');
     label.className = `filtro-usuario-chip ${isActivo ? 'activo' : ''}`;
@@ -797,7 +809,8 @@ function renderizarFiltroCoincidencias() {
 
 if (btnSelTodos) {
   btnSelTodos.addEventListener('click', () => {
-    usuarios.forEach(u => usuariosSeleccionadosCoincidencias.add(u));
+    const miembrosGrupo = (typeof obtenerMiembrosGrupo === 'function') ? obtenerMiembrosGrupo(grupoActivo) : usuarios;
+    miembrosGrupo.forEach(u => usuariosSeleccionadosCoincidencias.add(u));
     renderizarFiltroCoincidencias();
   });
 }
@@ -1009,24 +1022,73 @@ if (btnGuardarMiPin) {
   });
 }
 
-// --- SISTEMA MULTI-GRUPO (AMIGOS, FAMILIA, PAREJA, HIJOS, ETC.) ---
-let grupoActivo = localStorage.getItem('kedadas_grupo_activo') || 'Amigos';
-let listaGrupos = [
-  { id: 'amigos', nombre: 'Amigos', icono: '🍻' },
-  { id: 'familia', nombre: 'Familia', icono: '👨‍👩‍👧‍👦' },
-  { id: 'pareja', nombre: 'Pareja', icono: '💑' },
-  { id: 'hijos', nombre: 'Hijos', icono: '👶' }
+// --- SISTEMA MULTI-GRUPO, SEGURIDAD PRIVADA Y ADMINISTRACIÓN DE MIEMBROS ---
+const GRUPOS_DEFECTO = [
+  {
+    id: 'amigos',
+    nombre: 'Amigos',
+    icono: '🍻',
+    creador: 'Cule',
+    miembros: ['Cule', 'Persona 2', 'Persona 3', 'Persona 4'],
+    codigo_acceso: 'AMIGOS-1234',
+    descripcion: 'Cuadrante con amigos'
+  },
+  {
+    id: 'familia',
+    nombre: 'Familia',
+    icono: '👨‍👩‍👧‍👦',
+    creador: 'Cule',
+    miembros: ['Cule', 'Persona 2'],
+    codigo_acceso: 'FAMILIA-1234',
+    descripcion: 'Planes familiares'
+  },
+  {
+    id: 'pareja',
+    nombre: 'Pareja',
+    icono: '💑',
+    creador: 'Cule',
+    miembros: ['Cule', 'Persona 3'],
+    codigo_acceso: 'PAREJA-1234',
+    descripcion: 'Turnos y planes en pareja'
+  },
+  {
+    id: 'hijos',
+    nombre: 'Hijos',
+    icono: '👶',
+    creador: 'Cule',
+    miembros: ['Cule', 'Persona 4'],
+    codigo_acceso: 'HIJOS-1234',
+    descripcion: 'Horarios de los peques y actividades'
+  }
 ];
+
+let grupoActivo = localStorage.getItem('kedadas_grupo_activo') || 'Amigos';
+let listaGrupos = [...GRUPOS_DEFECTO];
 
 const selectorGrupoActivo = document.getElementById('selector-grupo-activo');
 const btnAbrirModalGrupos = document.getElementById('btn-abrir-modal-grupos');
 const modalGestionarGrupos = document.getElementById('modal-gestionar-grupos');
 const btnCerrarModalGrupos = document.getElementById('btn-cerrar-modal-grupos');
 const btnCerrarGruposFooter = document.getElementById('btn-cerrar-grupos-footer');
-const nuevoGrupoIcono = document.getElementById('nuevo-grupo-icono');
-const nuevoGrupoNombre = document.getElementById('nuevo-grupo-nombre');
-const btnGuardarNuevoGrupo = document.getElementById('btn-guardar-nuevo-grupo');
+const nuevoGrupoIconoModal = document.getElementById('nuevo-grupo-icono-modal');
+const nuevoGrupoNombreModal = document.getElementById('nuevo-grupo-nombre-modal');
+const btnGuardarNuevoGrupoModal = document.getElementById('btn-guardar-nuevo-grupo-modal');
 const listaGruposGestion = document.getElementById('lista-grupos-gestion');
+
+// Elementos de la nueva pestaña de grupos y administración
+const nuevoGrupoIconoTab = document.getElementById('nuevo-grupo-icono-tab');
+const nuevoGrupoNombreTab = document.getElementById('nuevo-grupo-nombre-tab');
+const btnGuardarNuevoGrupoTab = document.getElementById('btn-guardar-nuevo-grupo-tab');
+const btnCopiarCodigoGrupo = document.getElementById('btn-copiar-codigo-grupo');
+const btnAnadirUsuarioExistente = document.getElementById('btn-anadir-usuario-existente');
+const selectUsuarioExistenteGrupo = document.getElementById('select-usuario-existente-grupo');
+const inputNuevoNombreMiembro = document.getElementById('input-nuevo-nombre-miembro');
+const inputNuevoPinMiembro = document.getElementById('input-nuevo-pin-miembro');
+const btnCrearYAnadirMiembro = document.getElementById('btn-crear-y-anadir-miembro');
+const inputCodigoUnirse = document.getElementById('input-codigo-unirse');
+const btnUnirseConCodigo = document.getElementById('btn-unirse-con-codigo');
+const btnEditarGrupoActivo = document.getElementById('btn-editar-grupo-activo');
+const btnEliminarGrupoActivo = document.getElementById('btn-eliminar-grupo-activo');
 
 // Elementos de aviso de grupo y confirmación de guardado de horario
 const badgeGrupoBanner = document.getElementById('badge-grupo-banner');
@@ -1038,6 +1100,69 @@ const btnCancelarCambiosHorario = document.getElementById('btn-cancelar-cambios-
 const btnGuardarCambiosHorario = document.getElementById('btn-guardar-cambios-horario');
 const btnGuardarHorarioTop = document.getElementById('btn-guardar-horario-top');
 
+function normalizarGrupo(g) {
+  let miembros = [];
+  if (Array.isArray(g.miembros)) {
+    miembros = g.miembros;
+  } else if (typeof g.miembros === 'string') {
+    try {
+      miembros = JSON.parse(g.miembros);
+    } catch (e) {
+      miembros = [];
+    }
+  }
+  if (!Array.isArray(miembros) || miembros.length === 0) {
+    const def = GRUPOS_DEFECTO.find(d => d.id === g.id || d.nombre.toLowerCase() === (g.nombre || '').toLowerCase());
+    if (def) miembros = [...def.miembros];
+    else miembros = [g.creador || usuarioLogueado || 'Cule'];
+  }
+  const creador = g.creador || (['Amigos', 'Familia', 'Pareja', 'Hijos'].includes(g.nombre) ? 'Cule' : (usuarioLogueado || 'Cule'));
+  const codigo = g.codigo_acceso || generarCodigoAcceso(g.nombre);
+  return {
+    id: g.id || g.nombre.toLowerCase().replace(/\s+/g, '-'),
+    nombre: g.nombre,
+    icono: g.icono || '👥',
+    creador: creador,
+    miembros: miembros,
+    codigo_acceso: codigo,
+    descripcion: g.descripcion || ''
+  };
+}
+
+function generarCodigoAcceso(nombre) {
+  const base = (nombre || 'GRUPO').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) || 'GRUPO';
+  const rand = Math.floor(1000 + Math.random() * 9000);
+  return `${base}-${rand}`;
+}
+
+function puedeUsuarioVerGrupo(g, usuario) {
+  if (!usuario) return true;
+  if (esAdmin || usuario.toLowerCase() === 'cule') return true;
+  const gNorm = normalizarGrupo(g);
+  if (gNorm.creador && gNorm.creador.toLowerCase() === usuario.toLowerCase()) return true;
+  if (Array.isArray(gNorm.miembros) && gNorm.miembros.some(m => m.toLowerCase() === usuario.toLowerCase())) return true;
+  return false;
+}
+
+function obtenerGruposVisibles(usuario) {
+  return listaGrupos.filter(g => puedeUsuarioVerGrupo(g, usuario));
+}
+
+function esAdminDelGrupo(g, usuario) {
+  if (!g) return false;
+  if (esAdmin || (usuario && usuario.toLowerCase() === 'cule')) return true;
+  const gNorm = normalizarGrupo(g);
+  if (gNorm.creador && usuario && gNorm.creador.toLowerCase() === usuario.toLowerCase()) return true;
+  return false;
+}
+
+function obtenerMiembrosGrupo(grupoNombre) {
+  const g = listaGrupos.find(item => item.nombre.toLowerCase() === (grupoNombre || grupoActivo).toLowerCase());
+  if (!g) return ['Cule', 'Persona 2', 'Persona 3', 'Persona 4'];
+  const norm = normalizarGrupo(g);
+  return norm.miembros;
+}
+
 function actualizarBannerGrupo() {
   const grupoObj = listaGrupos.find(g => g.nombre.toLowerCase() === grupoActivo.toLowerCase());
   const texto = `${grupoObj?.icono || '👥'} ${grupoActivo}`;
@@ -1048,29 +1173,64 @@ function actualizarBannerGrupo() {
   if (chatTituloGrupo) chatTituloGrupo.textContent = `💬 Tablón de Avisos — ${grupoActivo}`;
 }
 
+async function sincronizarGrupoEnSupabase(grupo) {
+  try {
+    const payload = {
+      id: grupo.id,
+      nombre: grupo.nombre,
+      icono: grupo.icono || '👥',
+      creador: grupo.creador || 'Cule',
+      miembros: JSON.stringify(grupo.miembros || []),
+      codigo_acceso: grupo.codigo_acceso || generarCodigoAcceso(grupo.nombre),
+      descripcion: grupo.descripcion || ''
+    };
+    await supabaseApp.from('grupos').upsert(payload, { onConflict: 'id' });
+  } catch (err) {
+    console.warn('Aviso sincronizando grupo en Supabase:', err);
+  }
+}
+
 async function cargarGruposDesdeBD() {
   try {
     const { data, error } = await supabaseApp.from('grupos').select('*').order('created_at', { ascending: true });
     if (!error && data && data.length > 0) {
-      listaGrupos = data;
+      listaGrupos = data.map(g => normalizarGrupo(g));
     } else {
       const guardados = JSON.parse(localStorage.getItem('kedadas_lista_grupos'));
-      if (Array.isArray(guardados) && guardados.length > 0) listaGrupos = guardados;
+      if (Array.isArray(guardados) && guardados.length > 0) {
+        listaGrupos = guardados.map(g => normalizarGrupo(g));
+      } else {
+        listaGrupos = [...GRUPOS_DEFECTO];
+      }
     }
   } catch (e) {
     const guardados = JSON.parse(localStorage.getItem('kedadas_lista_grupos'));
-    if (Array.isArray(guardados) && guardados.length > 0) listaGrupos = guardados;
+    if (Array.isArray(guardados) && guardados.length > 0) {
+      listaGrupos = guardados.map(g => normalizarGrupo(g));
+    } else {
+      listaGrupos = [...GRUPOS_DEFECTO];
+    }
   }
 
   localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos));
   renderizarSelectorGrupos();
+  renderizarPanelGestionGrupoActivo();
   actualizarBannerGrupo();
 }
 
 function renderizarSelectorGrupos() {
+  const visibles = obtenerGruposVisibles(usuarioLogueado);
+
+  // Si el grupo activo no es accesible para el usuario conectado, conmutar al primero que sí lo sea
+  if (visibles.length > 0 && !visibles.some(g => g.nombre.toLowerCase() === grupoActivo.toLowerCase())) {
+    grupoActivo = visibles[0].nombre;
+    localStorage.setItem('kedadas_grupo_activo', grupoActivo);
+  }
+
+  // Actualizar selector dropdown
   if (selectorGrupoActivo) {
     selectorGrupoActivo.innerHTML = '';
-    listaGrupos.forEach(g => {
+    visibles.forEach(g => {
       const opt = document.createElement('option');
       opt.value = g.nombre;
       opt.textContent = `${g.icono || '👥'} ${g.nombre}`;
@@ -1079,30 +1239,168 @@ function renderizarSelectorGrupos() {
     });
   }
 
-  // Renderizar tarjetas visuales de grupos en la pestaña Grupos
+  // Actualizar contador de grupos visibles
+  const badgeContador = document.getElementById('badge-contador-grupos');
+  if (badgeContador) {
+    badgeContador.textContent = `${visibles.length} grupo${visibles.length === 1 ? '' : 's'}`;
+  }
+
+  // Renderizar tarjetas interactivas de grupos autorizados
   const contenedorTarjetas = document.getElementById('contenedor-tarjetas-grupos');
   if (contenedorTarjetas) {
     contenedorTarjetas.innerHTML = '';
-    listaGrupos.forEach(g => {
-      const esActivo = g.nombre.toLowerCase() === grupoActivo.toLowerCase();
-      const card = document.createElement('div');
-      card.className = `card-grupo-item ${esActivo ? 'activa' : ''}`;
-      card.innerHTML = `
-        <span class="card-grupo-icono">${g.icono || '👥'}</span>
-        <span class="card-grupo-nombre">${g.nombre}</span>
-        ${esActivo ? '<span class="badge-grupo-activo">Activo</span>' : ''}
-      `;
-      card.addEventListener('click', () => {
-        if (!esActivo) {
-          cambiarGrupo(g.nombre);
-        }
+    if (visibles.length === 0) {
+      contenedorTarjetas.innerHTML = '<p class="modal-desc-sub" style="grid-column: 1/-1;">No tienes ningún grupo asignado todavía. Introduce un código de invitación o crea tu propio grupo privado abajo.</p>';
+    } else {
+      visibles.forEach(g => {
+        const esActivo = g.nombre.toLowerCase() === grupoActivo.toLowerCase();
+        const esAdminG = esAdminDelGrupo(g, usuarioLogueado);
+        const numMiembros = (g.miembros || []).length;
+        const card = document.createElement('div');
+        card.className = `card-grupo-item ${esActivo ? 'activa' : ''}`;
+        card.innerHTML = `
+          <span class="card-grupo-icono">${g.icono || '👥'}</span>
+          <span class="card-grupo-nombre">${g.nombre}</span>
+          <div class="card-grupo-meta-row">
+            <span class="badge-miembros-card">👥 ${numMiembros}</span>
+            ${esAdminG ? '<span class="badge-admin-card">👑 Admin</span>' : ''}
+          </div>
+          ${esActivo ? '<span class="badge-grupo-activo">Activo</span>' : ''}
+        `;
+        card.addEventListener('click', () => {
+          if (!esActivo) {
+            cambiarGrupo(g.nombre);
+          }
+        });
+        contenedorTarjetas.appendChild(card);
       });
-      contenedorTarjetas.appendChild(card);
+    }
+  }
+
+  actualizarBannerGrupo();
+}
+
+function renderizarPanelGestionGrupoActivo() {
+  const grupo = listaGrupos.find(g => g.nombre.toLowerCase() === grupoActivo.toLowerCase());
+  if (!grupo) return;
+  const gNorm = normalizarGrupo(grupo);
+
+  const iconoEl = document.getElementById('grupo-admin-icono');
+  if (iconoEl) iconoEl.textContent = gNorm.icono || '👥';
+
+  const nombreEl = document.getElementById('grupo-admin-nombre');
+  if (nombreEl) nombreEl.textContent = gNorm.nombre;
+
+  const creadorEl = document.getElementById('nombre-creador-grupo');
+  if (creadorEl) creadorEl.textContent = gNorm.creador;
+
+  const esAdminG = esAdminDelGrupo(gNorm, usuarioLogueado);
+
+  const badgeRol = document.getElementById('grupo-admin-badge-rol');
+  if (badgeRol) {
+    badgeRol.className = esAdminG ? 'badge-rol-admin' : 'badge-rol-miembro';
+    badgeRol.textContent = esAdminG ? '👑 Eres Administrador' : '👤 Eres Miembro';
+  }
+
+  const codigoDisplay = document.getElementById('codigo-invitacion-display');
+  if (codigoDisplay) codigoDisplay.textContent = gNorm.codigo_acceso;
+
+  const contadorMiembros = document.getElementById('contador-miembros-grupo');
+  if (contadorMiembros) contadorMiembros.textContent = gNorm.miembros.length;
+
+  const nombreGrupoAnadir = document.getElementById('nombre-grupo-anadir');
+  if (nombreGrupoAnadir) nombreGrupoAnadir.textContent = `"${gNorm.nombre}"`;
+
+  // Renderizar miembros en la lista
+  const contenedorMiembros = document.getElementById('lista-miembros-grupo-contenedor');
+  if (contenedorMiembros) {
+    contenedorMiembros.innerHTML = '';
+    gNorm.miembros.forEach(m => {
+      const esCreador = m.toLowerCase() === gNorm.creador.toLowerCase();
+      const esYo = usuarioLogueado && m.toLowerCase() === usuarioLogueado.toLowerCase();
+      const inicial = m.charAt(0).toUpperCase();
+
+      const item = document.createElement('div');
+      item.className = 'miembro-card-item';
+      item.innerHTML = `
+        <div class="miembro-info-wrap">
+          <div class="miembro-avatar-icon">${inicial}</div>
+          <div>
+            <div class="miembro-nombre-txt">${m} ${esYo ? '<small style="color:#6366f1; font-weight:800;">(Tú)</small>' : ''}</div>
+            <div class="miembro-tags-row">
+              <span class="${esCreador ? 'badge-rol-admin' : 'badge-rol-miembro'}">${esCreador ? '👑 Creador / Admin' : '👤 Miembro'}</span>
+            </div>
+          </div>
+        </div>
+        <div class="miembro-acciones-btns"></div>
+      `;
+
+      const accionesWrap = item.querySelector('.miembro-acciones-btns');
+
+      // Si soy admin del grupo y este miembro no es el creador, puedo quitarlo
+      if (esAdminG && !esCreador) {
+        const btnQuitar = document.createElement('button');
+        btnQuitar.type = 'button';
+        btnQuitar.className = 'btn-quitar-miembro-mini';
+        btnQuitar.textContent = '❌ Quitar';
+        btnQuitar.title = `Quitar a ${m} de ${gNorm.nombre}`;
+        btnQuitar.addEventListener('click', () => quitarMiembroDeGrupo(gNorm.id, m));
+        accionesWrap.appendChild(btnQuitar);
+      } else if (!esCreador && esYo) {
+        // Si no soy admin y soy yo, puedo abandonar el grupo
+        const btnSalir = document.createElement('button');
+        btnSalir.type = 'button';
+        btnSalir.className = 'btn-salir-grupo-mini';
+        btnSalir.textContent = '🚪 Salir';
+        btnSalir.title = `Abandonar el grupo ${gNorm.nombre}`;
+        btnSalir.addEventListener('click', () => abandonarGrupo(gNorm.id));
+        accionesWrap.appendChild(btnSalir);
+      }
+
+      contenedorMiembros.appendChild(item);
     });
+  }
+
+  // Visibilidad de controles de administración según permisos
+  const zonaAnadir = document.getElementById('zona-anadir-miembros');
+  const avisoNoAdmin = document.getElementById('aviso-no-admin-grupo');
+  const btnEditarGrupo = document.getElementById('btn-editar-grupo-activo');
+  const btnEliminarGrupo = document.getElementById('btn-eliminar-grupo-activo');
+
+  if (esAdminG) {
+    if (zonaAnadir) zonaAnadir.style.display = 'block';
+    if (avisoNoAdmin) avisoNoAdmin.style.display = 'none';
+    if (btnEditarGrupo) btnEditarGrupo.style.display = 'inline-flex';
+    if (btnEliminarGrupo) btnEliminarGrupo.style.display = 'inline-flex';
+
+    // Poblar selector de personas existentes que aún no están en este grupo
+    if (selectUsuarioExistenteGrupo) {
+      selectUsuarioExistenteGrupo.innerHTML = '<option value="">-- Selecciona una persona --</option>';
+      usuarios.filter(u => !gNorm.miembros.some(m => m.toLowerCase() === u.toLowerCase())).forEach(u => {
+        const opt = document.createElement('option');
+        opt.value = u;
+        opt.textContent = `👤 ${u}`;
+        selectUsuarioExistenteGrupo.appendChild(opt);
+      });
+    }
+  } else {
+    if (zonaAnadir) zonaAnadir.style.display = 'none';
+    if (avisoNoAdmin) {
+      avisoNoAdmin.style.display = 'flex';
+      const adminTxt = document.getElementById('nombre-admin-aviso');
+      if (adminTxt) adminTxt.textContent = gNorm.creador;
+    }
+    if (btnEditarGrupo) btnEditarGrupo.style.display = 'none';
+    if (btnEliminarGrupo) btnEliminarGrupo.style.display = 'none';
   }
 }
 
 function cambiarGrupo(nuevoGrupo) {
+  const g = listaGrupos.find(item => item.nombre.toLowerCase() === nuevoGrupo.toLowerCase());
+  if (g && !puedeUsuarioVerGrupo(g, usuarioLogueado)) {
+    return alert(`🔒 Grupo Privado: No tienes acceso al grupo "${nuevoGrupo}". Pide al administrador (${g.creador || 'el creador'}) que te añada o introduce su código de invitación.`);
+  }
+
   if (Object.keys(cambiosHorarioPendientes).length > 0) {
     const guardar = confirm(`Tienes modificaciones sin guardar en el cuadrante de "${grupoActivo}". ¿Deseas guardarlas antes de cambiar a "${nuevoGrupo}"?`);
     if (guardar) {
@@ -1115,29 +1413,351 @@ function cambiarGrupo(nuevoGrupo) {
 
   grupoActivo = nuevoGrupo;
   localStorage.setItem('kedadas_grupo_activo', grupoActivo);
+
+  // Asegurar que miUsuario pertenece a los miembros del nuevo grupo
+  const miembrosNuevo = obtenerMiembrosGrupo(grupoActivo);
+  if (!miembrosNuevo.includes(miUsuario)) {
+    if (miembrosNuevo.includes(usuarioLogueado)) {
+      miUsuario = usuarioLogueado;
+    } else if (miembrosNuevo.length > 0) {
+      miUsuario = miembrosNuevo[0];
+    }
+  }
+
   renderizarSelectorGrupos();
+  renderizarPanelGestionGrupoActivo();
   actualizarBannerGrupo();
+  renderizarSelectoresUsuarios();
+  renderizarFiltroCoincidencias();
+
   if (resultadoCoincidencias) {
     resultadoCoincidencias.innerHTML = '';
     resultadoCoincidencias.classList.remove('visible');
   }
+
   iniciarCalendario();
   cargarChatInicial();
   setTimeout(cargarVotaciones, 200);
 }
 
+// Añadir usuario ya registrado al grupo activo
+async function anadirUsuarioExistenteAGrupoActivo() {
+  const grupo = listaGrupos.find(g => g.nombre.toLowerCase() === grupoActivo.toLowerCase());
+  if (!grupo) return;
+  if (!esAdminDelGrupo(grupo, usuarioLogueado)) {
+    return alert(`🔒 Solo el administrador (${grupo.creador}) puede añadir miembros a "${grupo.nombre}".`);
+  }
+
+  const usuarioSeleccionado = selectUsuarioExistenteGrupo ? selectUsuarioExistenteGrupo.value : '';
+  if (!usuarioSeleccionado) {
+    return alert('Por favor, selecciona una persona de la lista para añadir al grupo.');
+  }
+
+  if (!Array.isArray(grupo.miembros)) grupo.miembros = [];
+  if (grupo.miembros.some(m => m.toLowerCase() === usuarioSeleccionado.toLowerCase())) {
+    return alert(`"${usuarioSeleccionado}" ya pertenece a este grupo.`);
+  }
+
+  grupo.miembros.push(usuarioSeleccionado);
+  localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos));
+  await sincronizarGrupoEnSupabase(grupo);
+
+  renderizarSelectorGrupos();
+  renderizarPanelGestionGrupoActivo();
+  renderizarSelectoresUsuarios();
+  renderizarFiltroCoincidencias();
+
+  if (typeof confetti === 'function') confetti({ particleCount: 30, spread: 60 });
+  alert(`✅ ¡"${usuarioSeleccionado}" ha sido añadido al grupo "${grupo.nombre}"!`);
+}
+
+// Crear nueva persona e incluirla directamente en el grupo activo
+async function crearYAnadirNuevoMiembroAGrupoActivo() {
+  const grupo = listaGrupos.find(g => g.nombre.toLowerCase() === grupoActivo.toLowerCase());
+  if (!grupo) return;
+  if (!esAdminDelGrupo(grupo, usuarioLogueado)) {
+    return alert(`🔒 Solo el administrador (${grupo.creador}) puede añadir miembros a "${grupo.nombre}".`);
+  }
+
+  const nombre = (inputNuevoNombreMiembro?.value || '').trim();
+  const pin = (inputNuevoPinMiembro?.value || '').trim() || '0000';
+
+  if (!nombre) return alert('Por favor, escribe el nombre de la persona a invitar.');
+  if (pin.length !== 4 || isNaN(pin)) return alert('El PIN debe tener 4 dígitos numéricos.');
+
+  if (!Array.isArray(grupo.miembros)) grupo.miembros = [];
+  if (grupo.miembros.some(m => m.toLowerCase() === nombre.toLowerCase())) {
+    return alert(`"${nombre}" ya pertenece a este grupo.`);
+  }
+
+  // Si la persona no existe en la app, la creamos en listaPerfiles y Supabase
+  if (!usuarios.some(u => u.toLowerCase() === nombre.toLowerCase())) {
+    listaPerfiles.push({ id: nombre, nombre, pin, rol: 'usuario' });
+    guardarPerfilesLocales();
+    try {
+      await supabaseApp.from('perfiles').insert({ nombre, pin, rol: 'usuario' });
+    } catch (e) {}
+  }
+
+  grupo.miembros.push(nombre);
+  localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos));
+  await sincronizarGrupoEnSupabase(grupo);
+
+  if (inputNuevoNombreMiembro) inputNuevoNombreMiembro.value = '';
+  if (inputNuevoPinMiembro) inputNuevoPinMiembro.value = '';
+
+  renderizarSelectorGrupos();
+  renderizarPanelGestionGrupoActivo();
+  renderizarSelectoresUsuarios();
+  renderizarFiltroCoincidencias();
+
+  if (typeof confetti === 'function') confetti({ particleCount: 40, spread: 70 });
+  alert(`🎉 ¡"${nombre}" ha sido dado de alta y añadido al grupo "${grupo.nombre}"!`);
+}
+
+// Quitar miembro de un grupo
+async function quitarMiembroDeGrupo(grupoId, miembro) {
+  const grupo = listaGrupos.find(g => g.id === grupoId);
+  if (!grupo) return;
+
+  if (!esAdminDelGrupo(grupo, usuarioLogueado)) {
+    return alert(`🔒 Solo el administrador (${grupo.creador}) puede expulsar o quitar miembros.`);
+  }
+  if (miembro.toLowerCase() === grupo.creador.toLowerCase()) {
+    return alert(`No puedes quitar al creador y administrador (${grupo.creador}) del grupo.`);
+  }
+
+  const confirmar = confirm(`¿Estás seguro de que deseas quitar a "${miembro}" del grupo "${grupo.nombre}"?\nEsta persona ya no podrá ver los turnos ni el chat de este grupo.`);
+  if (!confirmar) return;
+
+  grupo.miembros = (grupo.miembros || []).filter(m => m.toLowerCase() !== miembro.toLowerCase());
+  localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos));
+  await sincronizarGrupoEnSupabase(grupo);
+
+  renderizarSelectorGrupos();
+  renderizarPanelGestionGrupoActivo();
+  renderizarSelectoresUsuarios();
+  renderizarFiltroCoincidencias();
+  alert(`🗑️ "${miembro}" ha sido retirado del grupo "${grupo.nombre}".`);
+}
+
+// Abandonar grupo voluntariamente
+async function abandonarGrupo(grupoId) {
+  const grupo = listaGrupos.find(g => g.id === grupoId);
+  if (!grupo) return;
+
+  const confirmar = confirm(`¿Deseas salir del grupo "${grupo.nombre}"?\nYa no tendrás acceso a su cuadrante ni a sus planes.`);
+  if (!confirmar) return;
+
+  grupo.miembros = (grupo.miembros || []).filter(m => m.toLowerCase() !== (usuarioLogueado || '').toLowerCase());
+  localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos));
+  await sincronizarGrupoEnSupabase(grupo);
+
+  const restantes = obtenerGruposVisibles(usuarioLogueado);
+  const nuevoG = restantes.length > 0 ? restantes[0].nombre : 'Amigos';
+  cambiarGrupo(nuevoG);
+  alert(`👋 Has salido del grupo "${grupo.nombre}".`);
+}
+
+// Unirse a un grupo mediante código de invitación
+async function unirseAGrupoConCodigo() {
+  const codigo = (inputCodigoUnirse?.value || '').trim().toUpperCase();
+  if (!codigo) return alert('Por favor, escribe el código de invitación del grupo (ej: AMIGOS-1234).');
+
+  const grupo = listaGrupos.find(g => (g.codigo_acceso || '').toUpperCase() === codigo || g.id.toUpperCase() === codigo);
+  if (!grupo) {
+    return alert(`❌ Código "${codigo}" no encontrado.\nPide al administrador del grupo que te facilite el código exacto.`);
+  }
+
+  const usuarioActual = usuarioLogueado || 'Cule';
+  if (!Array.isArray(grupo.miembros)) grupo.miembros = [];
+  if (grupo.miembros.some(m => m.toLowerCase() === usuarioActual.toLowerCase())) {
+    cambiarGrupo(grupo.nombre);
+    return alert(`Ya perteneces al grupo "${grupo.nombre}". ¡Te hemos llevado a él!`);
+  }
+
+  grupo.miembros.push(usuarioActual);
+  localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos));
+  await sincronizarGrupoEnSupabase(grupo);
+
+  if (inputCodigoUnirse) inputCodigoUnirse.value = '';
+  cambiarGrupo(grupo.nombre);
+
+  if (typeof confetti === 'function') confetti({ particleCount: 50, spread: 80 });
+  alert(`🎉 ¡Enhorabuena! Te has unido con éxito al grupo privado "${grupo.icono || '👥'} ${grupo.nombre}".`);
+}
+
+// Crear nuevo grupo privado desde la pestaña
+async function guardarNuevoGrupoDesdePestana() {
+  const nombre = (nuevoGrupoNombreTab?.value || '').trim();
+  const icono = (nuevoGrupoIconoTab?.value || '').trim() || '👥';
+
+  if (!nombre) return alert('Por favor, indica un nombre para el grupo (ej: Urgencias, Padel, Pareja...).');
+
+  const id = nombre.toLowerCase().replace(/\s+/g, '-');
+  if (listaGrupos.some(g => g.nombre.toLowerCase() === nombre.toLowerCase())) {
+    return alert('Ya existe un grupo con este nombre.');
+  }
+
+  btnGuardarNuevoGrupoTab.textContent = 'Creando...';
+  const creador = usuarioLogueado || 'Cule';
+  const codigo = generarCodigoAcceso(nombre);
+
+  const nuevoGrupoObj = {
+    id,
+    nombre,
+    icono,
+    creador,
+    miembros: [creador],
+    codigo_acceso: codigo,
+    descripcion: `Grupo privado administrado por ${creador}`
+  };
+
+  listaGrupos.push(nuevoGrupoObj);
+  localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos));
+  await sincronizarGrupoEnSupabase(nuevoGrupoObj);
+
+  if (nuevoGrupoNombreTab) nuevoGrupoNombreTab.value = '';
+  if (nuevoGrupoIconoTab) nuevoGrupoIconoTab.value = '';
+  btnGuardarNuevoGrupoTab.textContent = 'Crear Grupo';
+
+  cambiarGrupo(nombre);
+
+  if (typeof confetti === 'function') confetti({ particleCount: 60, spread: 90 });
+  alert(`🎉 ¡Grupo "${icono} ${nombre}" creado con éxito!\nTú eres el administrador. Ya puedes añadir miembros o compartir tu código de invitación (${codigo}).`);
+}
+
+// Editar grupo activo (Nombre e Icono)
+async function editarGrupoActivo() {
+  const grupo = listaGrupos.find(g => g.nombre.toLowerCase() === grupoActivo.toLowerCase());
+  if (!grupo) return;
+
+  if (!esAdminDelGrupo(grupo, usuarioLogueado)) {
+    return alert(`🔒 Solo el administrador (${grupo.creador}) puede editar los datos de este grupo.`);
+  }
+
+  const nuevoNombre = prompt(`Nombre para el grupo "${grupo.nombre}":`, grupo.nombre);
+  if (!nuevoNombre || !nuevoNombre.trim()) return;
+
+  const nuevoIcono = prompt(`Icono emoji para el grupo (ej: 💼, 🍻, ⚽):`, grupo.icono || '👥') || grupo.icono;
+
+  const nombreAntiguo = grupo.nombre;
+  grupo.nombre = nuevoNombre.trim();
+  grupo.icono = nuevoIcono.trim();
+
+  localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos));
+  await sincronizarGrupoEnSupabase(grupo);
+
+  grupoActivo = grupo.nombre;
+  localStorage.setItem('kedadas_grupo_activo', grupoActivo);
+
+  renderizarSelectorGrupos();
+  renderizarPanelGestionGrupoActivo();
+  actualizarBannerGrupo();
+  alert(`✅ Grupo actualizado a "${grupo.icono} ${grupo.nombre}".`);
+}
+
+// Eliminar grupo activo
+async function eliminarGrupoActivo() {
+  const grupo = listaGrupos.find(g => g.nombre.toLowerCase() === grupoActivo.toLowerCase());
+  if (!grupo) return;
+
+  if (!esAdminDelGrupo(grupo, usuarioLogueado)) {
+    return alert(`🔒 Solo el administrador (${grupo.creador}) puede eliminar este grupo.`);
+  }
+
+  const confirmar = confirm(`⚠️ ¿ELIMINAR GRUPO "${grupo.nombre}" DEFINITIVAMENTE?\nSe eliminará el grupo para todos sus miembros. Esta acción no se puede deshacer.`);
+  if (!confirmar) return;
+
+  try {
+    await supabaseApp.from('grupos').delete().eq('id', grupo.id);
+  } catch (e) {}
+
+  listaGrupos = listaGrupos.filter(g => g.id !== grupo.id);
+  localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos));
+
+  const restantes = obtenerGruposVisibles(usuarioLogueado);
+  const siguiente = restantes.length > 0 ? restantes[0].nombre : 'Amigos';
+  cambiarGrupo(siguiente);
+  alert(`🗑️ El grupo "${grupo.nombre}" ha sido eliminado.`);
+}
+
+// Conectar eventos de la pestaña de grupos y administración
 if (selectorGrupoActivo) {
   selectorGrupoActivo.addEventListener('change', (e) => {
     cambiarGrupo(e.target.value);
   });
 }
 
-// Renderizar panel de gestión de grupos
+if (btnCopiarCodigoGrupo) {
+  btnCopiarCodigoGrupo.addEventListener('click', async () => {
+    const grupo = listaGrupos.find(g => g.nombre.toLowerCase() === grupoActivo.toLowerCase());
+    const codigo = grupo ? normalizarGrupo(grupo).codigo_acceso : '';
+    if (!codigo) return;
+    try {
+      await navigator.clipboard.writeText(codigo);
+      const original = btnCopiarCodigoGrupo.textContent;
+      btnCopiarCodigoGrupo.textContent = '✅ ¡Copiado!';
+      setTimeout(() => { btnCopiarCodigoGrupo.textContent = original; }, 2000);
+    } catch (e) {
+      prompt('Copia el código de invitación:', codigo);
+    }
+  });
+}
+
+if (btnAnadirUsuarioExistente) {
+  btnAnadirUsuarioExistente.addEventListener('click', anadirUsuarioExistenteAGrupoActivo);
+}
+
+if (btnCrearYAnadirMiembro) {
+  btnCrearYAnadirMiembro.addEventListener('click', crearYAnadirNuevoMiembroAGrupoActivo);
+}
+
+if (btnUnirseConCodigo) {
+  btnUnirseConCodigo.addEventListener('click', unirseAGrupoConCodigo);
+}
+
+if (inputCodigoUnirse) {
+  inputCodigoUnirse.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') unirseAGrupoConCodigo();
+  });
+}
+
+if (btnGuardarNuevoGrupoTab) {
+  btnGuardarNuevoGrupoTab.addEventListener('click', guardarNuevoGrupoDesdePestana);
+}
+
+if (btnEditarGrupoActivo) {
+  btnEditarGrupoActivo.addEventListener('click', editarGrupoActivo);
+}
+
+if (btnEliminarGrupoActivo) {
+  btnEliminarGrupoActivo.addEventListener('click', eliminarGrupoActivo);
+}
+
+// Soporte para modal legacy de grupos
+if (btnAbrirModalGrupos) {
+  btnAbrirModalGrupos.addEventListener('click', () => {
+    renderizarPanelGrupos();
+    if (modalGestionarGrupos) modalGestionarGrupos.style.display = 'flex';
+  });
+}
+
+[btnCerrarModalGrupos, btnCerrarGruposFooter].forEach(btn => {
+  if (btn) btn.addEventListener('click', () => { if (modalGestionarGrupos) modalGestionarGrupos.style.display = 'none'; });
+});
+if (modalGestionarGrupos) {
+  modalGestionarGrupos.addEventListener('click', (e) => {
+    if (e.target === modalGestionarGrupos) modalGestionarGrupos.style.display = 'none';
+  });
+}
+
 function renderizarPanelGrupos() {
   if (!listaGruposGestion) return;
   listaGruposGestion.innerHTML = '';
+  const visibles = obtenerGruposVisibles(usuarioLogueado);
 
-  listaGrupos.forEach(g => {
+  visibles.forEach(g => {
     const card = document.createElement('div');
     card.className = 'usuario-card-item';
 
@@ -1145,7 +1765,7 @@ function renderizarPanelGrupos() {
     info.className = 'user-card-info';
     info.innerHTML = `
       <div class="user-avatar-initial" style="background: transparent; font-size: 1.5rem;">${g.icono || '👥'}</div>
-      <div class="user-name-text">${g.nombre}</div>
+      <div class="user-name-text">${g.nombre} <small style="color:#64748b;">(${g.miembros?.length || 0} miembros)</small></div>
     `;
 
     const controls = document.createElement('div');
@@ -1156,86 +1776,36 @@ function renderizarPanelGrupos() {
     btnVer.textContent = 'Ver grupo';
     btnVer.addEventListener('click', () => {
       cambiarGrupo(g.nombre);
-      modalGestionarGrupos.style.display = 'none';
+      if (modalGestionarGrupos) modalGestionarGrupos.style.display = 'none';
     });
 
     controls.appendChild(btnVer);
-
-    // Permitir borrar si no es uno de los grupos base
-    const baseNames = ['amigos', 'familia', 'pareja', 'hijos'];
-    if (!baseNames.includes(g.id.toLowerCase()) && !baseNames.includes(g.nombre.toLowerCase())) {
-      const btnBorrar = document.createElement('button');
-      btnBorrar.className = 'btn-borrar-user-mini';
-      btnBorrar.textContent = '🗑️';
-      btnBorrar.title = 'Eliminar grupo ' + g.nombre;
-      btnBorrar.addEventListener('click', async () => {
-        if (confirm(`¿Eliminar el grupo "${g.nombre}"?`)) {
-          try {
-            await supabaseApp.from('grupos').delete().eq('id', g.id);
-          } catch(e) {}
-          listaGrupos = listaGrupos.filter(item => item.id !== g.id);
-          localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos));
-          if (grupoActivo === g.nombre) cambiarGrupo('Amigos');
-          renderizarPanelGrupos();
-          renderizarSelectorGrupos();
-        }
-      });
-      controls.appendChild(btnBorrar);
-    }
-
     card.appendChild(info);
     card.appendChild(controls);
     listaGruposGestion.appendChild(card);
   });
 }
 
-if (btnAbrirModalGrupos) {
-  btnAbrirModalGrupos.addEventListener('click', () => {
-    renderizarPanelGrupos();
-    modalGestionarGrupos.style.display = 'flex';
-  });
-}
+if (btnGuardarNuevoGrupoModal) {
+  btnGuardarNuevoGrupoModal.addEventListener('click', async () => {
+    const nombre = (nuevoGrupoNombreModal?.value || '').trim();
+    const icono = (nuevoGrupoIconoModal?.value || '').trim() || '👥';
+    if (!nombre) return alert('Por favor, indica un nombre para el grupo.');
 
-[btnCerrarModalGrupos, btnCerrarGruposFooter].forEach(btn => {
-  if (btn) btn.addEventListener('click', () => { modalGestionarGrupos.style.display = 'none'; });
-});
-if (modalGestionarGrupos) {
-  modalGestionarGrupos.addEventListener('click', (e) => {
-    if (e.target === modalGestionarGrupos) modalGestionarGrupos.style.display = 'none';
-  });
-}
-
-if (btnGuardarNuevoGrupo) {
-  btnGuardarNuevoGrupo.addEventListener('click', async () => {
-    const nombre = nuevoGrupoNombre.value.trim();
-    const icono = nuevoGrupoIcono.value.trim() || '👥';
-
-    if (!nombre) return alert('Por favor, indica un nombre para el grupo (ej: Trabajo, Pareja...).');
-    
+    const creador = usuarioLogueado || 'Cule';
     const id = nombre.toLowerCase().replace(/\s+/g, '-');
-    if (listaGrupos.some(g => g.nombre.toLowerCase() === nombre.toLowerCase())) {
-      return alert('Ya tienes un grupo con este nombre.');
-    }
+    const codigo = generarCodigoAcceso(nombre);
 
-    btnGuardarNuevoGrupo.textContent = 'Creando...';
-    const nuevoGrupoObj = { id, nombre, icono };
-
-    try {
-      await supabaseApp.from('grupos').insert(nuevoGrupoObj);
-    } catch (e) {
-      console.warn('Aviso guardando grupo en Supabase:', e);
-    }
-
-    listaGrupos.push(nuevoGrupoObj);
+    const nuevoObj = { id, nombre, icono, creador, miembros: [creador], codigo_acceso: codigo };
+    listaGrupos.push(nuevoObj);
     localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos));
-    
-    nuevoGrupoNombre.value = '';
-    nuevoGrupoIcono.value = '';
-    btnGuardarNuevoGrupo.textContent = 'Crear';
+    await sincronizarGrupoEnSupabase(nuevoObj);
+
+    if (nuevoGrupoNombreModal) nuevoGrupoNombreModal.value = '';
+    if (nuevoGrupoIconoModal) nuevoGrupoIconoModal.value = '';
+    if (modalGestionarGrupos) modalGestionarGrupos.style.display = 'none';
 
     cambiarGrupo(nombre);
-    modalGestionarGrupos.style.display = 'none';
-    alert(`🎉 ¡Grupo "${icono} ${nombre}" creado con éxito! Ya estás dentro.`);
   });
 }
 
@@ -3246,6 +3816,7 @@ function inicializarNavegacionPestanas() {
       if (typeof scrollChatAlFinal === 'function') scrollChatAlFinal();
     } else if (tabName === 'grupos') {
       renderizarSelectorGrupos();
+      if (typeof renderizarPanelGestionGrupoActivo === 'function') renderizarPanelGestionGrupoActivo();
     } else if (tabName === 'usuarios') {
       poblarEditorPersonaDesplegable();
     } else if (tabName === 'cuadrante') {

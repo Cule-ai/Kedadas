@@ -239,8 +239,8 @@
     <section class="tab-pane" id="tab-grupos" style="display: none;">
       <div class="tab-header-card">
         <div class="tab-header-info">
-          <h2>👥 Mis Grupos</h2>
-          <p>Cambia o añade espacios de turnos para Amigos, Familia, Pareja o Trabajo</p>
+          <h2>👥 Mis Grupos y Miembros</h2>
+          <p>Administra los miembros de cada grupo y mantén tus turnos completamente privados y seguros</p>
         </div>
       </div>
 
@@ -248,14 +248,8 @@
         <div class="grupo-selector-bar">
           <div class="grupo-select-wrap">
             <label for="selector-grupo-activo" class="grupo-label">Grupo Activo:</label>
-            <select id="selector-grupo-activo" class="selector-grupo-dropdown">
-              <option value="Amigos">🍻 Amigos</option>
-              <option value="Familia">👨‍👩‍👧‍👦 Familia</option>
-              <option value="Pareja">💑 Pareja</option>
-              <option value="Hijos">👶 Hijos</option>
-            </select>
+            <select id="selector-grupo-activo" class="selector-grupo-dropdown"></select>
           </div>
-          <button id="btn-abrir-modal-grupos" class="btn-chip-action btn-nuevo-grupo-chip" style="display: none;" title="Crear grupos">➕ Administrar</button>
         </div>
 
         <div id="badge-grupo-banner" class="badge-grupo-banner" style="margin-top: 10px;">
@@ -263,20 +257,119 @@
         </div>
       </div>
 
-      <!-- Tarjetas interactivas de grupos -->
+      <!-- Tarjetas de Grupos Autorizados para este usuario -->
       <div class="seccion-grupos-grid">
-        <h4>Elige tu grupo activo:</h4>
+        <div class="seccion-grupos-grid-header">
+          <h4>Tus grupos autorizados:</h4>
+          <span class="badge-contador-grupos" id="badge-contador-grupos">4 grupos</span>
+        </div>
         <div id="contenedor-tarjetas-grupos" class="grupos-grid-cards"></div>
       </div>
 
-      <!-- Formulario para crear nuevo grupo -->
-      <div class="box-crear-grupo-tab">
-        <h4>➕ Crear nuevo grupo</h4>
-        <p class="sub-crear-grupo">Crea un grupo independiente con su propio calendario, planes y chat.</p>
+      <!-- ======================================================== -->
+      <!-- PANEL DE ADMINISTRACIÓN Y MIEMBROS DEL GRUPO ACTIVO      -->
+      <!-- ======================================================== -->
+      <div class="panel-administracion-grupo-card" id="panel-administracion-grupo">
+        <div class="grupo-admin-header">
+          <div class="grupo-admin-titulo-wrap">
+            <span class="grupo-admin-icono" id="grupo-admin-icono">🍻</span>
+            <div>
+              <div class="grupo-admin-nombre-row">
+                <h3 id="grupo-admin-nombre">Amigos</h3>
+                <span id="grupo-admin-badge-rol" class="badge-rol-admin">👑 Administrador</span>
+              </div>
+              <p class="grupo-admin-creador-sub" id="grupo-admin-creador-sub">Creado y administrado por: <strong id="nombre-creador-grupo">Cule</strong></p>
+            </div>
+          </div>
+          <div class="grupo-admin-acciones-top" id="grupo-admin-acciones-top">
+            <button type="button" id="btn-editar-grupo-activo" class="btn-chip-action" title="Cambiar nombre o icono del grupo">✏️ Editar Grupo</button>
+            <button type="button" id="btn-eliminar-grupo-activo" class="btn-chip-action btn-danger-chip" title="Eliminar este grupo" style="display: none;">🗑️ Eliminar Grupo</button>
+          </div>
+        </div>
+
+        <!-- Código de Invitación / Acceso -->
+        <div class="codigo-invitacion-box">
+          <div class="codigo-invitacion-info">
+            <span class="codigo-invitacion-label">🔑 Código de Invitación para unirse a este grupo:</span>
+            <code class="codigo-invitacion-valor" id="codigo-invitacion-display">AMIGOS-1234</code>
+          </div>
+          <button type="button" id="btn-copiar-codigo-grupo" class="btn-sec-secundario-sm" title="Copiar código al portapapeles">📋 Copiar Código</button>
+        </div>
+
+        <!-- Lista de Miembros del Grupo -->
+        <div class="seccion-miembros-grupo">
+          <div class="miembros-header-row">
+            <h4>👥 Miembros de este grupo (<span id="contador-miembros-grupo">4</span>):</h4>
+            <span class="miembros-sub-privacidad">🔒 Solo estos miembros pueden ver y modificar este cuadrante</span>
+          </div>
+
+          <div id="lista-miembros-grupo-contenedor" class="lista-miembros-grid">
+            <!-- Se llena dinámicamente con JS -->
+          </div>
+        </div>
+
+        <!-- ZONA DE AÑADIR MIEMBRO (Visible para el Administrador del grupo) -->
+        <div id="zona-anadir-miembros" class="box-anadir-miembro">
+          <h4>➕ Añadir miembro a <span id="nombre-grupo-anadir">este grupo</span>:</h4>
+          
+          <div class="anadir-miembro-opciones">
+            <!-- Opción 1: Seleccionar de usuarios existentes -->
+            <div class="anadir-columna">
+              <label for="select-usuario-existente-grupo">Elegir persona ya registrada:</label>
+              <div class="anadir-input-row">
+                <select id="select-usuario-existente-grupo" class="selector-anadir-dropdown">
+                  <option value="">-- Selecciona una persona --</option>
+                </select>
+                <button type="button" id="btn-anadir-usuario-existente" class="btn-sec-primario-sm">➕ Añadir al Grupo</button>
+              </div>
+            </div>
+
+            <div class="anadir-separador-o"><span>O</span></div>
+
+            <!-- Opción 2: Crear nueva persona e incluirla directamente -->
+            <div class="anadir-columna">
+              <label for="input-nuevo-nombre-miembro">Crear e invitar nueva persona:</label>
+              <div class="anadir-input-row">
+                <input type="text" id="input-nuevo-nombre-miembro" placeholder="Nombre (ej: Laura)" maxlength="20">
+                <input type="password" id="input-nuevo-pin-miembro" placeholder="PIN (4 núm)" maxlength="4" inputmode="numeric" style="width: 105px;">
+                <button type="button" id="btn-crear-y-anadir-miembro" class="btn-sec-primario-sm">➕ Crear y Añadir</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- AVISO PARA NO ADMINISTRADORES -->
+        <div id="aviso-no-admin-grupo" class="aviso-privado-admin" style="display: none;">
+          <span class="aviso-icono">🔒</span>
+          <div>
+            <strong>Grupo Privado Protegido</strong>
+            <p>Solo el administrador (<strong id="nombre-admin-aviso">Cule</strong>) puede añadir o quitar miembros y editar los datos de este grupo.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- ======================================================== -->
+      <!-- UNIRSE A UN GRUPO PRIVADO CON CÓDIGO                     -->
+      <!-- ======================================================== -->
+      <div class="box-crear-grupo-tab box-unirse-codigo-tab">
+        <h4>🔑 ¿Tienes un código de invitación?</h4>
+        <p class="sub-crear-grupo">Introduce el código compartido por el administrador para unirte a su grupo privado.</p>
         <div class="form-nuevo-grupo-inline">
-          <input type="text" id="nuevo-grupo-icono" placeholder="Emoji (ej: 💼)" maxlength="4" style="width: 70px; text-align: center;">
-          <input type="text" id="nuevo-grupo-nombre" placeholder="Nombre (ej: Compañeros Turno)" maxlength="25">
-          <button type="button" id="btn-guardar-nuevo-grupo" class="btn-sec-primario">Crear Grupo</button>
+          <input type="text" id="input-codigo-unirse" placeholder="Ej: AMIGOS-1234" style="text-transform: uppercase;">
+          <button type="button" id="btn-unirse-con-codigo" class="btn-sec-primario">🔑 Unirme al Grupo</button>
+        </div>
+      </div>
+
+      <!-- ======================================================== -->
+      <!-- CREAR NUEVO GRUPO PRIVADO                                -->
+      <!-- ======================================================== -->
+      <div class="box-crear-grupo-tab">
+        <h4>➕ Crear nuevo grupo privado</h4>
+        <p class="sub-crear-grupo">Crea un grupo independiente. Tú serás el administrador y decidirás qué personas tienen acceso.</p>
+        <div class="form-nuevo-grupo-inline">
+          <input type="text" id="nuevo-grupo-icono-tab" placeholder="Emoji (ej: 💼)" maxlength="4" style="width: 70px; text-align: center;">
+          <input type="text" id="nuevo-grupo-nombre-tab" placeholder="Nombre (ej: Compañeros Turno)" maxlength="25">
+          <button type="button" id="btn-guardar-nuevo-grupo-tab" class="btn-sec-primario">Crear Grupo</button>
         </div>
       </div>
     </section>
@@ -646,9 +739,9 @@
         <div class="box-nuevo-usuario">
           <h4>➕ Crear nuevo grupo</h4>
           <div class="form-nuevo-grupo-row">
-            <input type="text" id="nuevo-grupo-icono" placeholder="Emoji (ej: 🍻, 👨‍👩‍👧, 💼)" maxlength="4" style="width: 70px; text-align: center;">
-            <input type="text" id="nuevo-grupo-nombre" placeholder="Nombre (ej: Trabajo, Padel...)" maxlength="25">
-            <button type="button" id="btn-guardar-nuevo-grupo" class="btn-sec-primario">Crear</button>
+            <input type="text" id="nuevo-grupo-icono-modal" placeholder="Emoji (ej: 🍻, 👨‍👩‍👧, 💼)" maxlength="4" style="width: 70px; text-align: center;">
+            <input type="text" id="nuevo-grupo-nombre-modal" placeholder="Nombre (ej: Trabajo, Padel...)" maxlength="25">
+            <button type="button" id="btn-guardar-nuevo-grupo-modal" class="btn-sec-primario">Crear</button>
           </div>
         </div>
 

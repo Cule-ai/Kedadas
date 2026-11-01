@@ -62,18 +62,27 @@ create table if not exists public.grupos (
   nombre text not null,
   icono text default '👥',
   descripcion text,
-  creador text,
+  creador text default 'Cule',
   miembros text default '[]', -- JSON array con nombres de miembros
+  codigo_acceso text,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
--- Insertar grupos por defecto si no existen
-insert into public.grupos (id, nombre, icono, descripcion) values
-  ('amigos', 'Amigos', '🍻', 'Cuadrante con amigos'),
-  ('familia', 'Familia', '👨‍👩‍👧‍👦', 'Planes familiares'),
-  ('pareja', 'Pareja', '💑', 'Turnos y planes en pareja'),
-  ('hijos', 'Hijos', '👶', 'Horarios de los peques y actividades')
-on conflict (id) do nothing;
+-- Asegurar columnas si la tabla ya existía
+alter table public.grupos add column if not exists creador text default 'Cule';
+alter table public.grupos add column if not exists miembros text default '[]';
+alter table public.grupos add column if not exists codigo_acceso text;
+
+-- Insertar o actualizar grupos por defecto
+insert into public.grupos (id, nombre, icono, descripcion, creador, miembros, codigo_acceso) values
+  ('amigos', 'Amigos', '🍻', 'Cuadrante con amigos', 'Cule', '["Cule", "Persona 2", "Persona 3", "Persona 4"]', 'AMIGOS-1234'),
+  ('familia', 'Familia', '👨‍👩‍👧‍👦', 'Planes familiares', 'Cule', '["Cule", "Persona 2"]', 'FAMILIA-1234'),
+  ('pareja', 'Pareja', '💑', 'Turnos y planes en pareja', 'Cule', '["Cule", "Persona 3"]', 'PAREJA-1234'),
+  ('hijos', 'Hijos', '👶', 'Horarios de los peques y actividades', 'Cule', '["Cule", "Persona 4"]', 'HIJOS-1234')
+on conflict (id) do update set
+  codigo_acceso = coalesce(public.grupos.codigo_acceso, excluded.codigo_acceso),
+  creador = coalesce(public.grupos.creador, excluded.creador),
+  miembros = coalesce(nullif(public.grupos.miembros, '[]'), excluded.miembros);
 
 -- Añadir columna 'grupo' a las tablas existentes para filtrar por grupo
 alter table public."Turnos" add column if not exists grupo text default 'Amigos';
@@ -90,6 +99,20 @@ alter table public.votaciones enable row level security;
 alter table public.mensajes enable row level security;
 alter table public.suscripciones_push enable row level security;
 alter table public.passkeys enable row level security;
+alter table public.grupos enable row level security;
+
+-- POLÍTICAS: GRUPOS
+create policy "Lectura de grupos para todos los usuarios"
+  on public.grupos for select using (true);
+
+create policy "Creación de grupos"
+  on public.grupos for insert with check (true);
+
+create policy "Modificación de grupos"
+  on public.grupos for update using (true);
+
+create policy "Borrado de grupos"
+  on public.grupos for delete using (true);
 
 -- POLÍTICAS: PERFILES
 create policy "Lectura pública/anónima de perfiles"
