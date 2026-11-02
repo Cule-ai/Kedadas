@@ -323,8 +323,8 @@ function concederAcceso(nombreUsuario, rolAdmin) {
     localStorage.setItem('kedadas_usuario_activo', usuarioLogueado);
   } catch(e) {}
   
-  pantallaLogin.style.display = 'none'; 
-  pantallaApp.style.display = 'block';
+  if (pantallaLogin) pantallaLogin.style.display = 'none'; 
+  if (pantallaApp) pantallaApp.style.display = 'block';
   if (btnEditarUsuarios) btnEditarUsuarios.style.display = 'inline-flex';
   
   if (badgeUsuarioSesion) {
@@ -338,19 +338,23 @@ function concederAcceso(nombreUsuario, rolAdmin) {
     perfilRol.className = esAdmin ? 'badge-rol-admin' : 'badge-rol-usuario';
   }
 
-  poblarSelectorIdentidadUsuario();
-  renderizarSelectorGrupos();
-  renderizarPanelGestionGrupoActivo();
-  renderizarSelector();
-  actualizarBannerGrupo();
-  iniciarCalendario();
-  cargarChatInicial();
-  setTimeout(cargarVotaciones, 300);
-  inicializarPushNotifications();
-  if (typeof window.cargarDatosUniversitariosEnPerfil === 'function') {
-    window.cargarDatosUniversitariosEnPerfil();
-  }
-  actualizarSelectorUbicacionRapido();
+  try { poblarSelectorIdentidadUsuario(); } catch(e) { console.warn('Aviso identidad:', e); }
+  try { renderizarSelectorGrupos(); } catch(e) { console.warn('Aviso grupos:', e); }
+  try { renderizarPanelGestionGrupoActivo(); } catch(e) { console.warn('Aviso panel grupo:', e); }
+  try { renderizarSelector(); } catch(e) { console.warn('Aviso selector:', e); }
+  try { actualizarBannerGrupo(); } catch(e) { console.warn('Aviso banner:', e); }
+  try { iniciarCalendario(); } catch(e) { console.warn('Aviso calendario:', e); }
+  try { cargarChatInicial(); } catch(e) { console.warn('Aviso chat:', e); }
+  setTimeout(() => {
+    try { cargarVotaciones(); } catch(e) {}
+  }, 300);
+  try { inicializarPushNotifications(); } catch(e) {}
+  try {
+    if (typeof window.cargarDatosUniversitariosEnPerfil === 'function') {
+      window.cargarDatosUniversitariosEnPerfil();
+    }
+  } catch(e) {}
+  try { actualizarSelectorUbicacionRapido(); } catch(e) {}
 }
 
 // --- 3. GESTIÓN DINÁMICA DE USUARIOS (DUAL SUPABASE + LOCAL) ---
@@ -426,7 +430,7 @@ async function cargarUsuariosDesdeBD() {
   }
 
   // Asegurar que Cule siempre exista
-  if (!listaPerfiles.some(p => p.nombre.toLowerCase() === 'cule')) {
+  if (!listaPerfiles.some(p => p && p.nombre && p.nombre.toLowerCase() === 'cule')) {
     listaPerfiles.unshift({ id: 'Cule', nombre: 'Cule', rol: 'admin' });
   }
 
@@ -437,7 +441,8 @@ async function cargarUsuariosDesdeBD() {
     const { data, error } = await supabaseApp.from('perfiles').select('*').order('created_at', { ascending: true });
     if (!error && data && data.length > 0) {
       data.forEach(dbPerfil => {
-        const local = listaPerfiles.find(p => p.nombre.toLowerCase() === dbPerfil.nombre.toLowerCase());
+        if (!dbPerfil || !dbPerfil.nombre) return;
+        const local = listaPerfiles.find(p => p && p.nombre && p.nombre.toLowerCase() === dbPerfil.nombre.toLowerCase());
         if (local) {
           if (dbPerfil.rol) local.rol = dbPerfil.rol;
           if (dbPerfil.es_universitario !== undefined) local.es_universitario = dbPerfil.es_universitario;
@@ -462,11 +467,28 @@ async function cargarUsuariosDesdeBD() {
     console.warn('Aviso sincronización Supabase perfiles:', err);
   }
 
-  renderizarSelectoresUsuarios();
-  renderizarFiltroCoincidencias();
-  actualizarEdicionPersonaDesplegable();
-  renderizarPanelGestionUsuarios();
+  try { renderizarSelectoresUsuarios(); } catch(e) { console.warn(e); }
+  try { renderizarFiltroCoincidencias(); } catch(e) { console.warn(e); }
+  try { actualizarEdicionPersonaDesplegable(); } catch(e) { console.warn(e); }
+  try { renderizarPanelGestionUsuarios(); } catch(e) { console.warn(e); }
 }
+
+// Actualiza el desplegable de edición rápida de personas
+function actualizarEdicionPersonaDesplegable() {
+  if (selectPersonaAEditar) {
+    const valActual = selectPersonaAEditar.value;
+    selectPersonaAEditar.innerHTML = '';
+    (usuarios || []).forEach(u => {
+      const opt = document.createElement('option');
+      opt.value = u;
+      opt.textContent = `👤 ${u}`;
+      selectPersonaAEditar.appendChild(opt);
+    });
+    if (usuarios.includes(valActual)) selectPersonaAEditar.value = valActual;
+    else if (usuarios.length > 0) selectPersonaAEditar.value = usuarios[0];
+  }
+}
+const poblarEditorPersonaDesplegable = actualizarEdicionPersonaDesplegable;
 
 // Actualizar todos los selectores desplegables de usuarios de la aplicación
 function renderizarSelectoresUsuarios() {
@@ -513,10 +535,10 @@ function renderizarSelectoresUsuarios() {
     cuadranteSelectorGrupo.innerHTML = '';
     visibles.forEach(g => {
       const opt = document.createElement('option');
-      const nombreG = g.nombre || g.name;
+      const nombreG = obtenerNombreGrupo(g);
       opt.value = nombreG;
       opt.textContent = `${g.icono || '👥'} ${nombreG}`;
-      if (nombreG.toLowerCase() === grupoActivo.toLowerCase()) opt.selected = true;
+      if (nombreG.toLowerCase() === (grupoActivo || '').toLowerCase()) opt.selected = true;
       cuadranteSelectorGrupo.appendChild(opt);
     });
 
@@ -528,20 +550,7 @@ function renderizarSelectoresUsuarios() {
     }
   }
 
-  // Selector en el panel desplegable de edición
-  if (selectPersonaAEditar) {
-    const valActual = selectPersonaAEditar.value;
-    selectPersonaAEditar.innerHTML = '';
-    usuarios.forEach(u => {
-      const opt = document.createElement('option');
-      opt.value = u;
-      opt.textContent = `👤 ${u}`;
-      selectPersonaAEditar.appendChild(opt);
-    });
-    if (usuarios.includes(valActual)) selectPersonaAEditar.value = valActual;
-    else if (usuarios.length > 0) selectPersonaAEditar.value = usuarios[0];
-  }
-
+  actualizarEdicionPersonaDesplegable();
   poblarSelectorIdentidadUsuario();
 }
 
@@ -628,18 +637,22 @@ function cambiarUsuarioActivo(nuevoNombre) {
     perfilRol.className = esAdmin ? 'badge-rol-admin' : 'badge-rol-usuario';
   }
 
-  poblarSelectorIdentidadUsuario();
-  renderizarSelectorGrupos();
-  renderizarPanelGestionGrupoActivo();
-  renderizarSelectoresUsuarios();
-  renderizarFiltroCoincidencias(true);
-  iniciarCalendario();
-  if (typeof window.cargarDatosUniversitariosEnPerfil === 'function') {
-    window.cargarDatosUniversitariosEnPerfil();
-  }
-  if (typeof actualizarSelectorUbicacionRapido === 'function') {
-    actualizarSelectorUbicacionRapido();
-  }
+  try { poblarSelectorIdentidadUsuario(); } catch(e) {}
+  try { renderizarSelectorGrupos(); } catch(e) {}
+  try { renderizarPanelGestionGrupoActivo(); } catch(e) {}
+  try { renderizarSelectoresUsuarios(); } catch(e) {}
+  try { renderizarFiltroCoincidencias(true); } catch(e) {}
+  try { iniciarCalendario(); } catch(e) {}
+  try {
+    if (typeof window.cargarDatosUniversitariosEnPerfil === 'function') {
+      window.cargarDatosUniversitariosEnPerfil();
+    }
+  } catch(e) {}
+  try {
+    if (typeof actualizarSelectorUbicacionRapido === 'function') {
+      actualizarSelectorUbicacionRapido();
+    }
+  } catch(e) {}
 }
 
 // Crear un nuevo usuario en la lista de personas
@@ -977,7 +990,7 @@ function renderizarFiltroCoincidencias(forzarTodos = false) {
   // Actualizar título del filtro indicando claramente el grupo activo
   const tituloFiltro = document.getElementById('coincidencias-filtro-titulo');
   if (tituloFiltro) {
-    const grupoObj = listaGrupos.find(g => (g.nombre || g.name || '').toLowerCase() === grupoActivo.toLowerCase());
+    const grupoObj = (listaGrupos || []).find(g => obtenerNombreGrupo(g).toLowerCase() === (grupoActivo || '').toLowerCase());
     const icono = grupoObj?.icono || '👥';
     tituloFiltro.innerHTML = `${icono} ¿Con quién quieres coincidir en <strong>${escapeHtml(grupoActivo)}</strong>?`;
   }
@@ -1223,21 +1236,30 @@ const btnCancelarCambiosHorario = document.getElementById('btn-cancelar-cambios-
 const btnGuardarCambiosHorario = document.getElementById('btn-guardar-cambios-horario');
 const btnGuardarHorarioTop = document.getElementById('btn-guardar-horario-top');
 
+function obtenerNombreGrupo(g) {
+  if (!g) return '';
+  if (typeof g === 'string') return g.trim();
+  return (g.nombre || g.name || 'Grupo').trim();
+}
+
 function normalizarGrupo(g) {
   if (!g) return null;
   const nombre = (g.nombre || g.name || 'Grupo').trim();
   let miembros = [];
   if (Array.isArray(g.miembros)) {
-    miembros = [...g.miembros];
+    miembros = g.miembros.map(m => (typeof m === 'string' ? m : (m?.nombre || m?.name || ''))).filter(Boolean);
   } else if (typeof g.miembros === 'string') {
     try {
-      miembros = JSON.parse(g.miembros);
+      const parsed = JSON.parse(g.miembros);
+      if (Array.isArray(parsed)) {
+        miembros = parsed.map(m => (typeof m === 'string' ? m : (m?.nombre || m?.name || ''))).filter(Boolean);
+      }
     } catch (e) {
       miembros = [];
     }
   }
   if (!Array.isArray(miembros) || miembros.length === 0) {
-    const def = GRUPOS_DEFECTO.find(d => (d.id || '').toLowerCase() === (g.id || '').toLowerCase() || d.nombre.toLowerCase() === nombre.toLowerCase());
+    const def = GRUPOS_DEFECTO.find(d => (d.id || '').toLowerCase() === (g.id || '').toLowerCase() || obtenerNombreGrupo(d).toLowerCase() === nombre.toLowerCase());
     if (def && Array.isArray(def.miembros) && def.miembros.length > 0) {
       miembros = [...def.miembros];
     } else {
@@ -1249,6 +1271,7 @@ function normalizarGrupo(g) {
   return {
     id: g.id || nombre.toLowerCase().replace(/\s+/g, '-'),
     nombre: nombre,
+    name: nombre,
     icono: g.icono || '👥',
     creador: creador,
     miembros: miembros,
@@ -1264,19 +1287,11 @@ function generarCodigoAcceso(nombre) {
 }
 
 function puedeUsuarioVerGrupo(g, usuario) {
-  if (!usuario) return true;
-  if (esAdmin || usuario.toLowerCase() === 'cule') return true;
-  const gNorm = normalizarGrupo(g);
-  if (!gNorm) return true;
-  const standard = ['amigos', 'familia', 'pareja', 'hijos'];
-  if (standard.includes((gNorm.nombre || '').toLowerCase())) return true;
-  if (gNorm.creador && gNorm.creador.toLowerCase() === usuario.toLowerCase()) return true;
-  if (Array.isArray(gNorm.miembros) && gNorm.miembros.some(m => m.toLowerCase() === usuario.toLowerCase())) return true;
   return true;
 }
 
 function obtenerGruposVisibles(usuario) {
-  return listaGrupos.filter(g => puedeUsuarioVerGrupo(g, usuario));
+  return (listaGrupos || []).map(g => normalizarGrupo(g)).filter(Boolean);
 }
 
 function esAdminDelGrupo(g, usuario) {
@@ -1290,17 +1305,14 @@ function esAdminDelGrupo(g, usuario) {
 
 function obtenerMiembrosGrupo(grupoNombre) {
   const nombreTarget = (grupoNombre || grupoActivo || '').trim().toLowerCase();
-  const g = listaGrupos.find(item => {
-    const n = (item.nombre || item.name || '').trim().toLowerCase();
-    return n === nombreTarget;
-  });
+  const g = (listaGrupos || []).find(item => obtenerNombreGrupo(item).toLowerCase() === nombreTarget);
   if (g) {
     const norm = normalizarGrupo(g);
     if (norm && Array.isArray(norm.miembros) && norm.miembros.length > 0) {
       return norm.miembros;
     }
   }
-  const def = GRUPOS_DEFECTO.find(d => d.nombre.toLowerCase() === nombreTarget || (d.id || '').toLowerCase() === nombreTarget);
+  const def = GRUPOS_DEFECTO.find(d => (d.id || '').toLowerCase() === nombreTarget || obtenerNombreGrupo(d).toLowerCase() === nombreTarget);
   if (def && Array.isArray(def.miembros) && def.miembros.length > 0) {
     return [...def.miembros];
   }
@@ -1308,14 +1320,13 @@ function obtenerMiembrosGrupo(grupoNombre) {
 }
 
 function actualizarBannerGrupo() {
-  const grupoObj = listaGrupos.find(g => (g.nombre || g.name || '').toLowerCase() === grupoActivo.toLowerCase());
+  const grupoObj = (listaGrupos || []).find(g => obtenerNombreGrupo(g).toLowerCase() === (grupoActivo || '').toLowerCase());
   const icono = grupoObj?.icono || '👥';
   const texto = `${icono} ${grupoActivo}`;
   if (nombreGrupoBanner) nombreGrupoBanner.textContent = texto;
   const nombreGrupoBannerTab = document.getElementById('nombre-grupo-banner-tab');
   if (nombreGrupoBannerTab) nombreGrupoBannerTab.textContent = texto;
   const chatTituloGrupo = document.getElementById('chat-titulo-grupo');
-  if (chatTituloGrupo) chatTituloGrupo.textContent = `💬 Tablón de Avisos — ${grupoActivo}`;
 }
 
 async function sincronizarGrupoEnSupabase(grupo) {
@@ -1407,11 +1418,14 @@ async function cargarGruposDesdeBD() {
 
   // 3. Fallback a almacenamiento local o valores por defecto
   if (!gruposCargados) {
-    const guardados = JSON.parse(localStorage.getItem('kedadas_lista_grupos'));
+    let guardados = null;
+    try {
+      guardados = JSON.parse(localStorage.getItem('kedadas_lista_grupos'));
+    } catch(e) {}
     if (Array.isArray(guardados) && guardados.length > 0) {
-      listaGrupos = guardados.map(g => normalizarGrupo(g));
+      listaGrupos = guardados.map(g => normalizarGrupo(g)).filter(Boolean);
     } else {
-      listaGrupos = [...GRUPOS_DEFECTO].map(g => normalizarGrupo(g));
+      listaGrupos = [...GRUPOS_DEFECTO].map(g => normalizarGrupo(g)).filter(Boolean);
     }
   }
 
@@ -1426,21 +1440,36 @@ async function cargarGruposDesdeBD() {
 function renderizarSelectorGrupos() {
   const visibles = obtenerGruposVisibles(usuarioLogueado);
 
-  // Si el grupo activo no es accesible para el usuario conectado, conmutar al primero que sí lo sea
-  if (visibles.length > 0 && !visibles.some(g => g.nombre.toLowerCase() === grupoActivo.toLowerCase())) {
-    grupoActivo = visibles[0].nombre;
-    localStorage.setItem('kedadas_grupo_activo', grupoActivo);
+  const nombreActivo = (grupoActivo || '').toLowerCase();
+  if (visibles.length > 0 && !visibles.some(g => obtenerNombreGrupo(g).toLowerCase() === nombreActivo)) {
+    grupoActivo = obtenerNombreGrupo(visibles[0]);
+    try { localStorage.setItem('kedadas_grupo_activo', grupoActivo); } catch(e) {}
   }
 
-  // Actualizar selector dropdown
+  // Actualizar selector dropdown en la pestaña de grupos
   if (selectorGrupoActivo) {
     selectorGrupoActivo.innerHTML = '';
     visibles.forEach(g => {
       const opt = document.createElement('option');
-      opt.value = g.nombre;
-      opt.textContent = `${g.icono || '👥'} ${g.nombre}`;
-      if (g.nombre.toLowerCase() === grupoActivo.toLowerCase()) opt.selected = true;
+      const n = obtenerNombreGrupo(g);
+      opt.value = n;
+      opt.textContent = `${g.icono || '👥'} ${n}`;
+      if (n.toLowerCase() === (grupoActivo || '').toLowerCase()) opt.selected = true;
       selectorGrupoActivo.appendChild(opt);
+    });
+  }
+
+  // Actualizar selector dropdown en el Cuadrante
+  const cuadranteSelectorGrupo = document.getElementById('cuadrante-selector-grupo');
+  if (cuadranteSelectorGrupo) {
+    cuadranteSelectorGrupo.innerHTML = '';
+    visibles.forEach(g => {
+      const opt = document.createElement('option');
+      const n = obtenerNombreGrupo(g);
+      opt.value = n;
+      opt.textContent = `${g.icono || '👥'} ${n}`;
+      if (n.toLowerCase() === (grupoActivo || '').toLowerCase()) opt.selected = true;
+      cuadranteSelectorGrupo.appendChild(opt);
     });
   }
 
@@ -1458,14 +1487,15 @@ function renderizarSelectorGrupos() {
       contenedorTarjetas.innerHTML = '<p class="modal-desc-sub" style="grid-column: 1/-1;">No tienes ningún grupo asignado todavía. Introduce un código de invitación o crea tu propio grupo privado abajo.</p>';
     } else {
       visibles.forEach(g => {
-        const esActivo = g.nombre.toLowerCase() === grupoActivo.toLowerCase();
+        const n = obtenerNombreGrupo(g);
+        const esActivo = n.toLowerCase() === (grupoActivo || '').toLowerCase();
         const esAdminG = esAdminDelGrupo(g, usuarioLogueado);
-        const numMiembros = (g.miembros || []).length;
+        const numMiembros = (Array.isArray(g.miembros) ? g.miembros : []).length;
         const card = document.createElement('div');
         card.className = `card-grupo-item ${esActivo ? 'activa' : ''}`;
         card.innerHTML = `
           <span class="card-grupo-icono">${escapeHtml(g.icono || '👥')}</span>
-          <span class="card-grupo-nombre">${escapeHtml(g.nombre)}</span>
+          <span class="card-grupo-nombre">${escapeHtml(n)}</span>
           <div class="card-grupo-meta-row">
             <span class="badge-miembros-card">👥 ${numMiembros}</span>
             ${esAdminG ? '<span class="badge-admin-card">👑 Admin</span>' : ''}
@@ -1474,7 +1504,7 @@ function renderizarSelectorGrupos() {
         `;
         card.addEventListener('click', () => {
           if (!esActivo) {
-            cambiarGrupo(g.nombre);
+            cambiarGrupo(n);
           }
         });
         contenedorTarjetas.appendChild(card);
@@ -1486,7 +1516,7 @@ function renderizarSelectorGrupos() {
 }
 
 function renderizarPanelGestionGrupoActivo() {
-  const grupo = listaGrupos.find(g => g.nombre.toLowerCase() === grupoActivo.toLowerCase());
+  const grupo = (listaGrupos || []).find(g => obtenerNombreGrupo(g).toLowerCase() === (grupoActivo || '').toLowerCase());
   if (!grupo) return;
   const gNorm = normalizarGrupo(grupo);
 
@@ -1520,12 +1550,14 @@ function renderizarPanelGestionGrupoActivo() {
   const contenedorMiembros = document.getElementById('lista-miembros-grupo-contenedor');
   if (contenedorMiembros) {
     contenedorMiembros.innerHTML = '';
-    gNorm.miembros.forEach(m => {
-      const esCreador = m.toLowerCase() === gNorm.creador.toLowerCase();
-      const esYo = usuarioLogueado && m.toLowerCase() === usuarioLogueado.toLowerCase();
-      const inicial = m.charAt(0).toUpperCase();
+    (gNorm.miembros || []).forEach(m => {
+      const mStr = String(m || '').trim();
+      if (!mStr) return;
+      const esCreador = mStr.toLowerCase() === (gNorm.creador || '').toLowerCase();
+      const esYo = usuarioLogueado && mStr.toLowerCase() === usuarioLogueado.toLowerCase();
+      const inicial = mStr.charAt(0).toUpperCase();
 
-      const ubi = obtenerIconoUbicacion(m);
+      const ubi = obtenerIconoUbicacion(mStr);
       const item = document.createElement('div');
       item.className = 'miembro-card-item';
       item.innerHTML = `
@@ -1535,7 +1567,7 @@ function renderizarPanelGestionGrupoActivo() {
             <span class="avatar-location-badge" title="${escapeHtml(ubi.title)}">${ubi.icon}</span>
           </div>
           <div>
-            <div class="miembro-nombre-txt">${escapeHtml(m)} ${esYo ? '<small style="color:#6366f1; font-weight:800;">(Tú)</small>' : ''}</div>
+            <div class="miembro-nombre-txt">${escapeHtml(mStr)} ${esYo ? '<small style="color:#6366f1; font-weight:800;">(Tú)</small>' : ''}</div>
             <div class="miembro-tags-row">
               <span class="${esCreador ? 'badge-rol-admin' : 'badge-rol-miembro'}">${esCreador ? '👑 Creador / Admin' : '👤 Miembro'}</span>
               <span class="badge-ubi-pill ${ubi.pillClass}">${ubi.icon} ${escapeHtml(ubi.text)}</span>
@@ -1546,25 +1578,24 @@ function renderizarPanelGestionGrupoActivo() {
       `;
 
       const accionesWrap = item.querySelector('.miembro-acciones-btns');
-
-      // Si soy admin del grupo y este miembro no es el creador, puedo quitarlo
-      if (esAdminG && !esCreador) {
-        const btnQuitar = document.createElement('button');
-        btnQuitar.type = 'button';
-        btnQuitar.className = 'btn-quitar-miembro-mini';
-        btnQuitar.textContent = '❌ Quitar';
-        btnQuitar.title = `Quitar a ${m} de ${gNorm.nombre}`;
-        btnQuitar.addEventListener('click', () => quitarMiembroDeGrupo(gNorm.id, m));
-        accionesWrap.appendChild(btnQuitar);
-      } else if (!esCreador && esYo) {
-        // Si no soy admin y soy yo, puedo abandonar el grupo
-        const btnSalir = document.createElement('button');
-        btnSalir.type = 'button';
-        btnSalir.className = 'btn-salir-grupo-mini';
-        btnSalir.textContent = '🚪 Salir';
-        btnSalir.title = `Abandonar el grupo ${gNorm.nombre}`;
-        btnSalir.addEventListener('click', () => abandonarGrupo(gNorm.id));
-        accionesWrap.appendChild(btnSalir);
+      if (accionesWrap) {
+        if (esAdminG && !esCreador) {
+          const btnQuitar = document.createElement('button');
+          btnQuitar.type = 'button';
+          btnQuitar.className = 'btn-quitar-miembro-mini';
+          btnQuitar.textContent = '❌ Quitar';
+          btnQuitar.title = `Quitar a ${mStr} de ${gNorm.nombre}`;
+          btnQuitar.addEventListener('click', () => quitarMiembroDeGrupo(gNorm.id, mStr));
+          accionesWrap.appendChild(btnQuitar);
+        } else if (!esCreador && esYo) {
+          const btnSalir = document.createElement('button');
+          btnSalir.type = 'button';
+          btnSalir.className = 'btn-salir-grupo-mini';
+          btnSalir.textContent = '🚪 Salir';
+          btnSalir.title = `Abandonar el grupo ${gNorm.nombre}`;
+          btnSalir.addEventListener('click', () => abandonarGrupo(gNorm.id));
+          accionesWrap.appendChild(btnSalir);
+        }
       }
 
       contenedorMiembros.appendChild(item);
@@ -1583,10 +1614,10 @@ function renderizarPanelGestionGrupoActivo() {
     if (btnEditarGrupo) btnEditarGrupo.style.display = 'inline-flex';
     if (btnEliminarGrupo) btnEliminarGrupo.style.display = 'inline-flex';
 
-    // Poblar selector de personas existentes que aún no están en este grupo
     if (selectUsuarioExistenteGrupo) {
       selectUsuarioExistenteGrupo.innerHTML = '<option value="">-- Selecciona una persona --</option>';
-      usuarios.filter(u => !gNorm.miembros.some(m => m.toLowerCase() === u.toLowerCase())).forEach(u => {
+      const miembrosLower = (gNorm.miembros || []).map(m => String(m).toLowerCase());
+      (usuarios || []).filter(u => u && !miembrosLower.includes(String(u).toLowerCase())).forEach(u => {
         const opt = document.createElement('option');
         opt.value = u;
         opt.textContent = `👤 ${u}`;
@@ -1607,25 +1638,31 @@ function renderizarPanelGestionGrupoActivo() {
 
 function cambiarGrupo(nuevoGrupo) {
   if (!nuevoGrupo) return;
-  const nombreLimpio = nuevoGrupo.trim();
-  const g = listaGrupos.find(item => (item.nombre || item.name || '').toLowerCase() === nombreLimpio.toLowerCase());
+  const nombreLimpio = (typeof nuevoGrupo === 'string' ? nuevoGrupo : (nuevoGrupo.nombre || nuevoGrupo.name || '')).trim();
+  if (!nombreLimpio) return;
 
-  if (Object.keys(cambiosHorarioPendientes).length > 0) {
-    const guardar = confirm(`Tienes modificaciones sin guardar en el cuadrante de "${grupoActivo}". ¿Deseas guardarlas antes de cambiar a "${nombreLimpio}"?`);
-    if (guardar) {
-      guardarCambiosHorarioConfirmado();
-    } else {
-      cambiosHorarioPendientes = {};
-      actualizarBarraCambiosPendientes();
+  const g = (listaGrupos || []).find(item => obtenerNombreGrupo(item).toLowerCase() === nombreLimpio.toLowerCase());
+
+  try {
+    if (Object.keys(cambiosHorarioPendientes).length > 0) {
+      const guardar = confirm(`Tienes modificaciones sin guardar en el cuadrante de "${grupoActivo}". ¿Deseas guardarlas antes de cambiar a "${nombreLimpio}"?`);
+      if (guardar) {
+        guardarCambiosHorarioConfirmado();
+      } else {
+        cambiosHorarioPendientes = {};
+        actualizarBarraCambiosPendientes();
+      }
     }
-  }
+  } catch(e) {}
 
-  grupoActivo = g ? (g.nombre || g.name) : nombreLimpio;
-  localStorage.setItem('kedadas_grupo_activo', grupoActivo);
+  grupoActivo = g ? obtenerNombreGrupo(g) : nombreLimpio;
+  try {
+    localStorage.setItem('kedadas_grupo_activo', grupoActivo);
+  } catch(e) {}
 
-  // Asegurar que si el usuario activo no está en los miembros del grupo, se le añade
+  // Sincronizar miembros del nuevo grupo
   const miembrosNuevo = obtenerMiembrosGrupo(grupoActivo);
-  if (usuarioLogueado && !miembrosNuevo.some(m => m.toLowerCase() === usuarioLogueado.toLowerCase())) {
+  if (usuarioLogueado && !miembrosNuevo.some(m => String(m || '').toLowerCase() === usuarioLogueado.toLowerCase())) {
     miembrosNuevo.push(usuarioLogueado);
     if (g && Array.isArray(g.miembros)) {
       g.miembros.push(usuarioLogueado);
@@ -1633,39 +1670,40 @@ function cambiarGrupo(nuevoGrupo) {
     }
   }
 
-  // Sincronizar el usuario visible en el calendario
   if (miembrosNuevo.includes(usuarioLogueado)) {
     miUsuario = usuarioLogueado;
   } else if (miembrosNuevo.length > 0) {
     miUsuario = miembrosNuevo[0];
   }
 
-  // IMPORTANTE: Forzar reinicialización de los miembros seleccionados para coincidencia
   usuariosSeleccionadosCoincidencias = new Set(miembrosNuevo);
   ultimoGrupoFiltroCoincidencias = grupoActivo;
 
-  renderizarSelectorGrupos();
-  renderizarPanelGestionGrupoActivo();
-  actualizarBannerGrupo();
-  renderizarSelectoresUsuarios();
-  renderizarFiltroCoincidencias(true);
+  try { renderizarSelectorGrupos(); } catch(e) { console.warn(e); }
+  try { renderizarPanelGestionGrupoActivo(); } catch(e) { console.warn(e); }
+  try { actualizarBannerGrupo(); } catch(e) { console.warn(e); }
+  try { renderizarSelectoresUsuarios(); } catch(e) { console.warn(e); }
+  try { renderizarFiltroCoincidencias(true); } catch(e) { console.warn(e); }
 
   if (resultadoCoincidencias) {
     resultadoCoincidencias.innerHTML = '';
     resultadoCoincidencias.classList.remove('visible');
   }
 
-  iniciarCalendario();
-  cargarChatInicial();
-  setTimeout(cargarVotaciones, 200);
+  try { iniciarCalendario(); } catch(e) { console.warn(e); }
+  try { cargarChatInicial(); } catch(e) { console.warn(e); }
+  setTimeout(() => {
+    try { cargarVotaciones(); } catch(e) {}
+  }, 200);
 }
 
 // Añadir usuario ya registrado al grupo activo
 async function anadirUsuarioExistenteAGrupoActivo() {
-  const grupo = listaGrupos.find(g => g.nombre.toLowerCase() === grupoActivo.toLowerCase());
+  const grupo = (listaGrupos || []).find(g => obtenerNombreGrupo(g).toLowerCase() === (grupoActivo || '').toLowerCase());
   if (!grupo) return;
+  const gNorm = normalizarGrupo(grupo);
   if (!esAdminDelGrupo(grupo, usuarioLogueado)) {
-    return alert(`🔒 Solo el administrador (${grupo.creador}) puede añadir miembros a "${grupo.nombre}".`);
+    return alert(`🔒 Solo el administrador (${gNorm.creador}) puede añadir miembros a "${gNorm.nombre}".`);
   }
 
   const usuarioSeleccionado = selectUsuarioExistenteGrupo ? selectUsuarioExistenteGrupo.value : '';
@@ -1674,12 +1712,12 @@ async function anadirUsuarioExistenteAGrupoActivo() {
   }
 
   if (!Array.isArray(grupo.miembros)) grupo.miembros = [];
-  if (grupo.miembros.some(m => m.toLowerCase() === usuarioSeleccionado.toLowerCase())) {
+  if (grupo.miembros.some(m => String(m).toLowerCase() === usuarioSeleccionado.toLowerCase())) {
     return alert(`"${usuarioSeleccionado}" ya pertenece a este grupo.`);
   }
 
   grupo.miembros.push(usuarioSeleccionado);
-  localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos));
+  try { localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos)); } catch(e) {}
   await sincronizarGrupoEnSupabase(grupo);
 
   renderizarSelectorGrupos();
@@ -1688,15 +1726,16 @@ async function anadirUsuarioExistenteAGrupoActivo() {
   renderizarFiltroCoincidencias();
 
   if (typeof confetti === 'function') confetti({ particleCount: 30, spread: 60 });
-  alert(`✅ ¡"${usuarioSeleccionado}" ha sido añadido al grupo "${grupo.nombre}"!`);
+  alert(`✅ ¡"${usuarioSeleccionado}" ha sido añadido al grupo "${gNorm.nombre}"!`);
 }
 
 // Crear nueva persona e incluirla directamente en el grupo activo
 async function crearYAnadirNuevoMiembroAGrupoActivo() {
-  const grupo = listaGrupos.find(g => g.nombre.toLowerCase() === grupoActivo.toLowerCase());
+  const grupo = (listaGrupos || []).find(g => obtenerNombreGrupo(g).toLowerCase() === (grupoActivo || '').toLowerCase());
   if (!grupo) return;
+  const gNorm = normalizarGrupo(grupo);
   if (!esAdminDelGrupo(grupo, usuarioLogueado)) {
-    return alert(`🔒 Solo el administrador (${grupo.creador}) puede añadir miembros a "${grupo.nombre}".`);
+    return alert(`🔒 Solo el administrador (${gNorm.creador}) puede añadir miembros a "${gNorm.nombre}".`);
   }
 
   const nombre = (inputNuevoNombreMiembro?.value || '').trim();
@@ -1704,12 +1743,12 @@ async function crearYAnadirNuevoMiembroAGrupoActivo() {
   if (!nombre) return alert('Por favor, escribe el nombre de la persona a invitar.');
 
   if (!Array.isArray(grupo.miembros)) grupo.miembros = [];
-  if (grupo.miembros.some(m => m.toLowerCase() === nombre.toLowerCase())) {
+  if (grupo.miembros.some(m => String(m).toLowerCase() === nombre.toLowerCase())) {
     return alert(`"${nombre}" ya pertenece a este grupo.`);
   }
 
   // Si la persona no existe en la app, la creamos en listaPerfiles y Supabase
-  if (!usuarios.some(u => u.toLowerCase() === nombre.toLowerCase())) {
+  if (!usuarios.some(u => String(u).toLowerCase() === nombre.toLowerCase())) {
     listaPerfiles.push({ id: nombre, nombre, rol: 'usuario' });
     guardarPerfilesLocales();
     try {
@@ -1718,7 +1757,7 @@ async function crearYAnadirNuevoMiembroAGrupoActivo() {
   }
 
   grupo.miembros.push(nombre);
-  localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos));
+  try { localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos)); } catch(e) {}
   await sincronizarGrupoEnSupabase(grupo);
 
   if (inputNuevoNombreMiembro) inputNuevoNombreMiembro.value = '';
@@ -1729,51 +1768,53 @@ async function crearYAnadirNuevoMiembroAGrupoActivo() {
   renderizarFiltroCoincidencias();
 
   if (typeof confetti === 'function') confetti({ particleCount: 40, spread: 70 });
-  alert(`🎉 ¡"${nombre}" ha sido dado de alta y añadido al grupo "${grupo.nombre}"!`);
+  alert(`🎉 ¡"${nombre}" ha sido dado de alta y añadido al grupo "${gNorm.nombre}"!`);
 }
 
 // Quitar miembro de un grupo
 async function quitarMiembroDeGrupo(grupoId, miembro) {
-  const grupo = listaGrupos.find(g => g.id === grupoId);
+  const grupo = (listaGrupos || []).find(g => g && g.id === grupoId);
   if (!grupo) return;
+  const gNorm = normalizarGrupo(grupo);
 
   if (!esAdminDelGrupo(grupo, usuarioLogueado)) {
-    return alert(`🔒 Solo el administrador (${grupo.creador}) puede expulsar o quitar miembros.`);
+    return alert(`🔒 Solo el administrador (${gNorm.creador}) puede expulsar o quitar miembros.`);
   }
-  if (miembro.toLowerCase() === grupo.creador.toLowerCase()) {
-    return alert(`No puedes quitar al creador y administrador (${grupo.creador}) del grupo.`);
+  if (String(miembro).toLowerCase() === (gNorm.creador || '').toLowerCase()) {
+    return alert(`No puedes quitar al creador y administrador (${gNorm.creador}) del grupo.`);
   }
 
-  const confirmar = confirm(`¿Estás seguro de que deseas quitar a "${miembro}" del grupo "${grupo.nombre}"?\nEsta persona ya no podrá ver los turnos ni el chat de este grupo.`);
+  const confirmar = confirm(`¿Estás seguro de que deseas quitar a "${miembro}" del grupo "${gNorm.nombre}"?\nEsta persona ya no podrá ver los turnos ni el chat de este grupo.`);
   if (!confirmar) return;
 
-  grupo.miembros = (grupo.miembros || []).filter(m => m.toLowerCase() !== miembro.toLowerCase());
-  localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos));
+  grupo.miembros = (grupo.miembros || []).filter(m => String(m).toLowerCase() !== String(miembro).toLowerCase());
+  try { localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos)); } catch(e) {}
   await sincronizarGrupoEnSupabase(grupo);
 
   renderizarSelectorGrupos();
   renderizarPanelGestionGrupoActivo();
   renderizarSelectoresUsuarios();
   renderizarFiltroCoincidencias();
-  alert(`🗑️ "${miembro}" ha sido retirado del grupo "${grupo.nombre}".`);
+  alert(`🗑️ "${miembro}" ha sido retirado del grupo "${gNorm.nombre}".`);
 }
 
 // Abandonar grupo voluntariamente
 async function abandonarGrupo(grupoId) {
-  const grupo = listaGrupos.find(g => g.id === grupoId);
+  const grupo = (listaGrupos || []).find(g => g && g.id === grupoId);
   if (!grupo) return;
+  const gNorm = normalizarGrupo(grupo);
 
-  const confirmar = confirm(`¿Deseas salir del grupo "${grupo.nombre}"?\nYa no tendrás acceso a su cuadrante ni a sus planes.`);
+  const confirmar = confirm(`¿Deseas salir del grupo "${gNorm.nombre}"?\nYa no tendrás acceso a su cuadrante ni a sus planes.`);
   if (!confirmar) return;
 
-  grupo.miembros = (grupo.miembros || []).filter(m => m.toLowerCase() !== (usuarioLogueado || '').toLowerCase());
-  localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos));
+  grupo.miembros = (grupo.miembros || []).filter(m => String(m).toLowerCase() !== (usuarioLogueado || '').toLowerCase());
+  try { localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos)); } catch(e) {}
   await sincronizarGrupoEnSupabase(grupo);
 
   const restantes = obtenerGruposVisibles(usuarioLogueado);
-  const nuevoG = restantes.length > 0 ? restantes[0].nombre : 'Amigos';
+  const nuevoG = restantes.length > 0 ? obtenerNombreGrupo(restantes[0]) : 'Amigos';
   cambiarGrupo(nuevoG);
-  alert(`👋 Has salido del grupo "${grupo.nombre}".`);
+  alert(`👋 Has salido del grupo "${gNorm.nombre}".`);
 }
 
 // Unirse a un grupo mediante código de invitación (RPC Supabase o Local)
@@ -1809,27 +1850,32 @@ async function unirseAGrupoConCodigo() {
   }
 
   // 2. Fallback de retrocompatibilidad con lista de grupos sincronizados
-  const grupo = listaGrupos.find(g => (g.codigo_acceso || '').toUpperCase() === codigo || g.id.toUpperCase() === codigo);
+  const grupo = (listaGrupos || []).find(g => {
+    if (!g) return false;
+    const gNorm = normalizarGrupo(g);
+    return (gNorm.codigo_acceso || '').toUpperCase() === codigo || (g.id || '').toUpperCase() === codigo;
+  });
   if (!grupo) {
     if (btnUnirseConCodigo) btnUnirseConCodigo.textContent = '🔑 Unirme al Grupo';
     return alert(`❌ Código "${codigo}" no encontrado o caducado.\nPide al administrador del grupo que te facilite el código o enlace actualizado.`);
   }
 
+  const gNorm = normalizarGrupo(grupo);
   const usuarioActual = usuarioLogueado || 'Cule';
   if (!Array.isArray(grupo.miembros)) grupo.miembros = [];
-  if (grupo.miembros.some(m => m.toLowerCase() === usuarioActual.toLowerCase())) {
-    cambiarGrupo(grupo.nombre);
+  if (grupo.miembros.some(m => String(m).toLowerCase() === usuarioActual.toLowerCase())) {
+    cambiarGrupo(gNorm.nombre);
     if (btnUnirseConCodigo) btnUnirseConCodigo.textContent = '🔑 Unirme al Grupo';
-    return alert(`Ya perteneces al grupo "${grupo.nombre}". ¡Te hemos llevado a él!`);
+    return alert(`Ya perteneces al grupo "${gNorm.nombre}". ¡Te hemos llevado a él!`);
   }
 
   grupo.miembros.push(usuarioActual);
-  localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos));
+  try { localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos)); } catch(e) {}
   await sincronizarGrupoEnSupabase(grupo);
 
   if (inputCodigoUnirse) inputCodigoUnirse.value = '';
   if (btnUnirseConCodigo) btnUnirseConCodigo.textContent = '🔑 Unirme al Grupo';
-  cambiarGrupo(grupo.nombre);
+  cambiarGrupo(gNorm.nombre);
 
   if (typeof confetti === 'function') confetti({ particleCount: 50, spread: 80 });
   alert(`🎉 ¡Enhorabuena! Te has unido con éxito al grupo privado "${grupo.icono || '👥'} ${grupo.nombre}".`);
@@ -1886,27 +1932,28 @@ async function guardarNuevoGrupoDesdePestana() {
 
 // Editar grupo activo (Nombre e Icono)
 async function editarGrupoActivo() {
-  const grupo = listaGrupos.find(g => g.nombre.toLowerCase() === grupoActivo.toLowerCase());
+  const grupo = (listaGrupos || []).find(g => obtenerNombreGrupo(g).toLowerCase() === (grupoActivo || '').toLowerCase());
   if (!grupo) return;
+  const gNorm = normalizarGrupo(grupo);
 
   if (!esAdmin && !esAdminDelGrupo(grupo, usuarioLogueado)) {
-    return alert(`🔒 Solo el administrador (${grupo.creador}) puede editar los datos de este grupo.`);
+    return alert(`🔒 Solo el administrador (${gNorm.creador}) puede editar los datos de este grupo.`);
   }
 
-  const nuevoNombre = prompt(`Nombre para el grupo "${grupo.nombre}":`, grupo.nombre);
+  const nuevoNombre = prompt(`Nombre para el grupo "${gNorm.nombre}":`, gNorm.nombre);
   if (!nuevoNombre || !nuevoNombre.trim()) return;
 
   const nuevoIcono = prompt(`Icono emoji para el grupo (ej: 💼, 🍻, ⚽):`, grupo.icono || '👥') || grupo.icono;
 
-  const nombreAntiguo = grupo.nombre;
   grupo.nombre = nuevoNombre.trim();
-  grupo.icono = nuevoIcono.trim();
+  grupo.name = nuevoNombre.trim();
+  grupo.icono = (nuevoIcono || '👥').trim();
 
-  localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos));
+  try { localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos)); } catch(e) {}
   await sincronizarGrupoEnSupabase(grupo);
 
   grupoActivo = grupo.nombre;
-  localStorage.setItem('kedadas_grupo_activo', grupoActivo);
+  try { localStorage.setItem('kedadas_grupo_activo', grupoActivo); } catch(e) {}
 
   renderizarSelectorGrupos();
   renderizarPanelGestionGrupoActivo();
@@ -1916,27 +1963,28 @@ async function editarGrupoActivo() {
 
 // Eliminar grupo activo
 async function eliminarGrupoActivo() {
-  const grupo = listaGrupos.find(g => g.nombre.toLowerCase() === grupoActivo.toLowerCase());
+  const grupo = (listaGrupos || []).find(g => obtenerNombreGrupo(g).toLowerCase() === (grupoActivo || '').toLowerCase());
   if (!grupo) return;
+  const gNorm = normalizarGrupo(grupo);
 
   if (!esAdmin && !esAdminDelGrupo(grupo, usuarioLogueado)) {
-    return alert(`🔒 Solo el administrador (${grupo.creador}) puede eliminar este grupo.`);
+    return alert(`🔒 Solo el administrador (${gNorm.creador}) puede eliminar este grupo.`);
   }
 
-  const confirmar = confirm(`⚠️ ¿ELIMINAR GRUPO "${grupo.nombre}" DEFINITIVAMENTE?\nSe eliminará el grupo para todos sus miembros. Esta acción no se puede deshacer.`);
+  const confirmar = confirm(`⚠️ ¿ELIMINAR GRUPO "${gNorm.nombre}" DEFINITIVAMENTE?\nSe eliminará el grupo para todos sus miembros. Esta acción no se puede deshacer.`);
   if (!confirmar) return;
 
   try {
     await supabaseApp.from('grupos').delete().eq('id', grupo.id);
   } catch (e) {}
 
-  listaGrupos = listaGrupos.filter(g => g.id !== grupo.id);
-  localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos));
+  listaGrupos = (listaGrupos || []).filter(g => g && g.id !== grupo.id);
+  try { localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos)); } catch(e) {}
 
   const restantes = obtenerGruposVisibles(usuarioLogueado);
-  const siguiente = restantes.length > 0 ? restantes[0].nombre : 'Amigos';
+  const siguiente = restantes.length > 0 ? obtenerNombreGrupo(restantes[0]) : 'Amigos';
   cambiarGrupo(siguiente);
-  alert(`🗑️ El grupo "${grupo.nombre}" ha sido eliminado.`);
+  alert(`🗑️ El grupo "${gNorm.nombre}" ha sido eliminado.`);
 }
 
 // Conectar eventos de la pestaña de grupos y administración
@@ -1948,12 +1996,13 @@ if (selectorGrupoActivo) {
 
 if (btnCopiarCodigoGrupo) {
   btnCopiarCodigoGrupo.addEventListener('click', async () => {
-    const grupo = listaGrupos.find(g => g.nombre.toLowerCase() === grupoActivo.toLowerCase());
-    const codigo = grupo ? normalizarGrupo(grupo).codigo_acceso : '';
+    const grupo = (listaGrupos || []).find(g => obtenerNombreGrupo(g).toLowerCase() === (grupoActivo || '').toLowerCase());
+    const gNorm = grupo ? normalizarGrupo(grupo) : null;
+    const codigo = gNorm ? gNorm.codigo_acceso : '';
     if (!codigo) return alert('No hay código de invitación disponible.');
 
     const enlaceInvitacion = `${window.location.origin}${window.location.pathname}?unirse=${codigo}`;
-    const textoMensaje = `¡Hola! Únete a mi grupo "${grupo.nombre}" en Kedadas para ver cuándo coincidimos libres:\n${enlaceInvitacion}\n(O introduce el código ${codigo} en la app)`;
+    const textoMensaje = `¡Hola! Únete a mi grupo "${gNorm.nombre}" en Kedadas para ver cuándo coincidimos libres:\n${enlaceInvitacion}\n(O introduce el código ${codigo} en la app)`;
 
     if (navigator.share) {
       try {
@@ -2405,23 +2454,52 @@ function obtenerFestivoNacional(dia, mes, anio) {
   return festivos[`${mes}-${dia}`] || null;
 }
 
+function normalizarIndiceEstado(valor) {
+  if (valor === undefined || valor === null) return 0;
+  if (typeof valor === 'number') {
+    if (isNaN(valor)) return 0;
+    const n = Math.floor(valor);
+    return (n >= 0 && n < estados.length) ? n : 0;
+  }
+  const str = String(valor).trim().toLowerCase();
+  if (!str || str === '0' || str === 'vacio') return 0;
+  if (str === '1' || str === 'l' || str === 'libre') return 1;
+  if (str === '2' || str === 'm' || str === 'manana' || str === 'mañana') return 2;
+  if (str === '3' || str === 't' || str === 'tarde') return 3;
+  if (str === '4' || str === 'n' || str === 'noche') return 4;
+  if (str === '5' || str === 'v' || str === 'vacaciones') return 5;
+  const num = parseInt(str, 10);
+  if (!isNaN(num) && num >= 0 && num < estados.length) return num;
+  return 0;
+}
+
 async function iniciarCalendario() {
-  actualizarBannerGrupo();
-  if (modoVista === 'mes') await renderizarMes();
-  else await renderizarAno();
+  try {
+    actualizarBannerGrupo();
+    if (modoVista === 'mes') await renderizarMes();
+    else await renderizarAno();
+  } catch(errCal) {
+    console.error('Error renderizando calendario:', errCal);
+  }
 }
 
 async function renderizarMes() {
+  if (!calendarGrid) return;
   calendarGrid.innerHTML = ''; 
   const mes = fechaNavegacion.getMonth();
   const anio = fechaNavegacion.getFullYear();
-  tituloMes.textContent = `${nombresMeses[mes]} ${anio}`; 
+  if (tituloMes) tituloMes.textContent = `${nombresMeses[mes]} ${anio}`; 
 
   const diasEnElMes = new Date(anio, mes + 1, 0).getDate();
   let diaEmpieza = new Date(anio, mes, 1).getDay();
   diaEmpieza = diaEmpieza === 0 ? 6 : diaEmpieza - 1;
 
-  const resTurnos = await obtenerTurnosMesNube();
+  let resTurnos = { autorizado: true, turnos: [] };
+  try {
+    resTurnos = await obtenerTurnosMesNube();
+  } catch(e) {
+    console.warn('Aviso obteniendo turnos mes:', e);
+  }
 
   // Si no está autorizado (ej. Lucía intentando ver el calendario de Cule sin permiso):
   if (!resTurnos.autorizado) {
@@ -2448,7 +2526,11 @@ async function renderizarMes() {
 
   const datosGuardados = resTurnos.turnos || [];
   const historial = {};
-  datosGuardados.forEach(dato => historial[dato.dia] = dato.indiceEstado);
+  datosGuardados.forEach(dato => {
+    if (dato && dato.dia !== undefined) {
+      historial[dato.dia] = dato.indiceEstado;
+    }
+  });
 
   for (let i = 0; i < diaEmpieza; i++) {
     const emptyDiv = document.createElement('div');
@@ -2459,16 +2541,18 @@ async function renderizarMes() {
   for (let i = 1; i <= diasEnElMes; i++) {
     const dayCell = document.createElement('div');
     const pendiente = cambiosHorarioPendientes[i];
-    let indice = pendiente !== undefined ? pendiente : (historial[i] !== undefined ? historial[i] : 0);
+    const rawIndice = pendiente !== undefined ? pendiente : (historial[i] !== undefined ? historial[i] : 0);
+    const indice = normalizarIndiceEstado(rawIndice);
+    const estadoObj = estados[indice] || estados[0];
     const festivo = obtenerFestivoNacional(i, mes, anio);
     
-    dayCell.className = `day ${estados[indice].clase} ${pendiente !== undefined ? 'dia-modificado-pendiente' : ''} ${festivo ? 'dia-festivo-nacional' : ''}`;
+    dayCell.className = `day ${estadoObj.clase} ${pendiente !== undefined ? 'dia-modificado-pendiente' : ''} ${festivo ? 'dia-festivo-nacional' : ''}`;
     if (festivo) {
       dayCell.setAttribute('data-festivo', festivo.nombre);
       dayCell.title = `🎉 Festivo nacional: ${festivo.nombre}`;
     }
 
-    const shiftTexto = estados[indice].texto || '';
+    const shiftTexto = estadoObj.texto || '';
     const shiftHtml = shiftTexto 
       ? `<span class="shift-label">${shiftTexto}</span>` 
       : (festivo ? `<span class="shift-label festivo-sublabel">🎉 Festivo</span>` : `<span class="shift-label"></span>`);
@@ -2482,19 +2566,21 @@ async function renderizarMes() {
     dayCell.addEventListener('click', () => {
       if (!esAdmin && miUsuario !== usuarioLogueado) return alert('Solo puedes editar tus turnos.');
 
-      let estadoActual = cambiosHorarioPendientes[i] !== undefined 
+      let rawEstadoActual = cambiosHorarioPendientes[i] !== undefined 
         ? cambiosHorarioPendientes[i] 
         : (historial[i] !== undefined ? historial[i] : 0);
+      let estadoActual = normalizarIndiceEstado(rawEstadoActual);
       
       let nuevoEstado = (estadoActual + 1) % estados.length;
       cambiosHorarioPendientes[i] = nuevoEstado;
+      const nuevoEstadoObj = estados[nuevoEstado] || estados[0];
 
-      const nuevoShiftTexto = estados[nuevoEstado].texto || '';
+      const nuevoShiftTexto = nuevoEstadoObj.texto || '';
       const nuevoShiftHtml = nuevoShiftTexto 
         ? `<span class="shift-label">${nuevoShiftTexto}</span>` 
         : (festivo ? `<span class="shift-label festivo-sublabel">🎉 Festivo</span>` : `<span class="shift-label"></span>`);
 
-      dayCell.className = `day ${estados[nuevoEstado].clase} ${festivo ? 'dia-festivo-nacional' : ''} dia-modificado-pendiente`;
+      dayCell.className = `day ${nuevoEstadoObj.clase} ${festivo ? 'dia-festivo-nacional' : ''} dia-modificado-pendiente`;
       dayCell.innerHTML = `
         ${festivo ? `<span class="festivo-tag" title="🎉 Festivo: ${escapeHtml(festivo.nombre)}">🎉</span>` : ''}
         <span class="day-number">${i}</span>
@@ -2544,11 +2630,18 @@ async function renderizarMes() {
 }
 
 async function renderizarAno() {
+  if (!vistaAnualContainer) return;
   vistaAnualContainer.innerHTML = '';
   const anio = fechaNavegacion.getFullYear();
-  tituloMes.textContent = `Año ${anio}`;
+  if (tituloMes) tituloMes.textContent = `Año ${anio}`;
 
-  const resTurnos = await obtenerTurnosAnoNube();
+  let resTurnos = { autorizado: true, turnos: [] };
+  try {
+    resTurnos = await obtenerTurnosAnoNube();
+  } catch(e) {
+    console.warn('Aviso obteniendo turnos anuales:', e);
+  }
+
   if (!resTurnos.autorizado) {
     vistaAnualContainer.innerHTML = `
       <div class="bloqueo-privacidad-calendario" style="margin: 30px auto; max-width: 500px;">
@@ -2575,8 +2668,15 @@ async function renderizarAno() {
   for(let i=0; i<12; i++) historialAno[i] = {};
   
   datosGuardados.forEach(dato => {
-    const m = parseInt(dato.mes_anio.split('-')[1]);
-    historialAno[m][dato.dia] = dato.indiceEstado;
+    if (dato && dato.mes_anio && dato.dia !== undefined) {
+      const parts = String(dato.mes_anio).split('-');
+      if (parts.length > 1) {
+        const m = parseInt(parts[1], 10);
+        if (!isNaN(m) && historialAno[m]) {
+          historialAno[m][dato.dia] = dato.indiceEstado;
+        }
+      }
+    }
   });
 
   // Leyenda en la vista anual
@@ -2617,10 +2717,11 @@ async function renderizarAno() {
 
     for (let dia = 1; dia <= diasEnMes; dia++) {
       const dayCell = document.createElement('div');
-      let indice = historialAno[mes][dia] !== undefined ? historialAno[mes][dia] : 0;
+      let indice = normalizarIndiceEstado(historialAno[mes][dia]);
+      const estadoObj = estados[indice] || estados[0];
       const festivo = obtenerFestivoNacional(dia, mes, anio);
       
-      dayCell.className = `mini-day ${estados[indice].clase} ${festivo ? 'mini-dia-festivo' : ''}`;
+      dayCell.className = `mini-day ${estadoObj.clase} ${festivo ? 'mini-dia-festivo' : ''}`;
       if (festivo) {
         dayCell.title = `${dia} de ${nombresMeses[mes]}: 🎉 Festivo (${festivo.nombre})`;
       }
@@ -2629,10 +2730,11 @@ async function renderizarAno() {
       dayCell.addEventListener('click', async () => {
         if (!esAdmin && miUsuario !== usuarioLogueado) return alert('Solo puedes editar tus turnos.');
         let nuevoIndice = (indice + 1) % estados.length;
-        const confirmacion = confirm(`¿Cambiar el día ${dia} de ${nombresMeses[mes]} a "${estados[nuevoIndice].texto || 'Vacío'}"?`);
+        const nuevoEstadoObj = estados[nuevoIndice] || estados[0];
+        const confirmacion = confirm(`¿Cambiar el día ${dia} de ${nombresMeses[mes]} a "${nuevoEstadoObj.texto || 'Vacío'}"?`);
         if (confirmacion) {
           indice = nuevoIndice;
-          dayCell.className = `mini-day ${estados[indice].clase} ${festivo ? 'mini-dia-festivo' : ''}`;
+          dayCell.className = `mini-day ${nuevoEstadoObj.clase} ${festivo ? 'mini-dia-festivo' : ''}`;
           await guardarTurnoNube(dia, indice, `${anio}-${mes}`);
         }
       });
@@ -3475,7 +3577,7 @@ function pintarTodosLosMensajes() {
 
 async function cargarChatInicial() {
   if (chatTituloGrupo) {
-    const grupoObj = listaGrupos.find(g => g.nombre.toLowerCase() === grupoActivo.toLowerCase());
+    const grupoObj = (listaGrupos || []).find(g => obtenerNombreGrupo(g).toLowerCase() === (grupoActivo || '').toLowerCase());
     chatTituloGrupo.textContent = `💬 Tablón de Avisos (${grupoObj?.icono || '👥'} ${grupoActivo})`;
   }
 
@@ -3591,7 +3693,10 @@ if (selectorTema) {
 }
 
 function aplicarTema(tema) {
-  const prefiereOscuro = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  if (!document.body) return;
+  const prefiereOscuro = (window.matchMedia && typeof window.matchMedia === 'function')
+    ? window.matchMedia('(prefers-color-scheme: dark)').matches
+    : false;
   if (tema === 'dark' || (tema === 'auto' && prefiereOscuro)) document.body.classList.add('dark-theme');
   else document.body.classList.remove('dark-theme');
 }
@@ -4604,31 +4709,43 @@ function inicializarNavegacionPestanas() {
   const btnTopUser = document.getElementById('btn-top-user-pill');
 
   function cambiarPestana(tabName) {
+    if (!tabName) return;
     tabBtns.forEach(btn => {
-      btn.classList.toggle('activo', btn.dataset.tab === tabName);
+      const match = btn.dataset.tab === tabName;
+      btn.classList.toggle('activo', match);
+      btn.classList.toggle('active', match);
     });
 
     tabPanes.forEach(pane => {
       const coincide = pane.id === `tab-${tabName}`;
       pane.style.display = coincide ? 'block' : 'none';
+      pane.classList.toggle('activo', coincide);
+      pane.classList.toggle('active', coincide);
     });
 
-    // Acciones específicas al activar cada pestaña
-    if (tabName === 'planes') {
-      pintarPlanesEnPantalla();
-    } else if (tabName === 'chat') {
-      if (typeof scrollChatAlFinal === 'function') scrollChatAlFinal();
-    } else if (tabName === 'grupos') {
-      renderizarSelectorGrupos();
-      if (typeof renderizarPanelGestionGrupoActivo === 'function') renderizarPanelGestionGrupoActivo();
-    } else if (tabName === 'usuarios') {
-      poblarEditorPersonaDesplegable();
-    } else if (tabName === 'cuadrante') {
-      renderizarSelectoresUsuarios();
-      renderizarFiltroCoincidencias();
-      iniciarCalendario();
+    // Acciones específicas al activar cada pestaña de forma segura
+    try {
+      if (tabName === 'planes') {
+        if (typeof pintarPlanesEnPantalla === 'function') pintarPlanesEnPantalla();
+      } else if (tabName === 'chat') {
+        if (typeof scrollChatAlFinal === 'function') scrollChatAlFinal();
+      } else if (tabName === 'grupos') {
+        if (typeof renderizarSelectorGrupos === 'function') renderizarSelectorGrupos();
+        if (typeof renderizarPanelGestionGrupoActivo === 'function') renderizarPanelGestionGrupoActivo();
+      } else if (tabName === 'usuarios') {
+        if (typeof actualizarEdicionPersonaDesplegable === 'function') actualizarEdicionPersonaDesplegable();
+        if (typeof renderizarPanelGestionUsuarios === 'function') renderizarPanelGestionUsuarios();
+      } else if (tabName === 'cuadrante') {
+        if (typeof renderizarSelectoresUsuarios === 'function') renderizarSelectoresUsuarios();
+        if (typeof renderizarFiltroCoincidencias === 'function') renderizarFiltroCoincidencias();
+        if (typeof iniciarCalendario === 'function') iniciarCalendario();
+      }
+    } catch(errTab) {
+      console.warn('Aviso al cambiar a pestaña ' + tabName, errTab);
     }
   }
+
+  window.cambiarPestana = cambiarPestana;
 
   tabBtns.forEach(btn => {
     btn.addEventListener('click', () => {
@@ -4664,15 +4781,15 @@ function inicializarNavegacionPestanas() {
 // =========================================================================
 window.addEventListener('DOMContentLoaded', async () => {
   // Inicializar navegación por pestañas limpias
-  inicializarNavegacionPestanas();
+  try { inicializarNavegacionPestanas(); } catch(e) { console.warn(e); }
 
   // Cargar lista dinámica de usuarios y grupos desde Supabase
-  await cargarGruposDesdeBD();
-  await cargarUsuariosDesdeBD();
+  try { await cargarGruposDesdeBD(); } catch(e) { console.warn('Aviso cargando grupos:', e); }
+  try { await cargarUsuariosDesdeBD(); } catch(e) { console.warn('Aviso cargando usuarios:', e); }
 
   // Inicializar filtros y controles para universitarios y puntos de encuentro
-  inicializarSelectorLugarQuedada();
-  inicializarModoUniversitarioPerfil();
+  try { inicializarSelectorLugarQuedada(); } catch(e) {}
+  try { inicializarModoUniversitarioPerfil(); } catch(e) {}
 
   // Determinar usuario activo al iniciar la app: Cule (Administrador) por defecto obligatorio
   let usuarioInicial = 'Cule';
@@ -4707,10 +4824,16 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   // Arrancar siempre con acceso concedido a Cule (o usuario seleccionado)
-  concederAcceso(usuarioInicial, esAdminInicial);
+  try {
+    concederAcceso(usuarioInicial, esAdminInicial);
+  } catch(e) {
+    console.error('Error concediendo acceso inicial:', e);
+  }
 
   // Detectar automáticamente si se ha abierto un enlace de invitación (?unirse=KED-XXXX)
-  comprobarParametroInvitacionUrl();
+  try {
+    comprobarParametroInvitacionUrl();
+  } catch(e) {}
 });
 
 // Inicializa el formulario del perfil para modo universitario
