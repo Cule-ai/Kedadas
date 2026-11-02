@@ -2153,10 +2153,15 @@ async function renderizarMes() {
       dayCell.title = `🎉 Festivo nacional: ${festivo.nombre}`;
     }
 
+    const shiftTexto = estados[indice].texto || '';
+    const shiftHtml = shiftTexto 
+      ? `<span class="shift-label">${shiftTexto}</span>` 
+      : (festivo ? `<span class="shift-label festivo-sublabel">🎉 Festivo</span>` : `<span class="shift-label"></span>`);
+
     dayCell.innerHTML = `
-      ${festivo ? `<span class="festivo-tag" title="🎉 Festivo: ${escapeHtml(festivo.nombre)}">★</span>` : ''}
+      ${festivo ? `<span class="festivo-tag" title="🎉 Festivo: ${escapeHtml(festivo.nombre)}">🎉</span>` : ''}
       <span class="day-number">${i}</span>
-      <span class="shift-label">${estados[indice].texto}</span>
+      ${shiftHtml}
     `;
 
     dayCell.addEventListener('click', () => {
@@ -2169,11 +2174,16 @@ async function renderizarMes() {
       let nuevoEstado = (estadoActual + 1) % estados.length;
       cambiosHorarioPendientes[i] = nuevoEstado;
 
+      const nuevoShiftTexto = estados[nuevoEstado].texto || '';
+      const nuevoShiftHtml = nuevoShiftTexto 
+        ? `<span class="shift-label">${nuevoShiftTexto}</span>` 
+        : (festivo ? `<span class="shift-label festivo-sublabel">🎉 Festivo</span>` : `<span class="shift-label"></span>`);
+
       dayCell.className = `day ${estados[nuevoEstado].clase} ${festivo ? 'dia-festivo-nacional' : ''} dia-modificado-pendiente`;
       dayCell.innerHTML = `
-        ${festivo ? `<span class="festivo-tag" title="🎉 Festivo: ${escapeHtml(festivo.nombre)}">★</span>` : ''}
+        ${festivo ? `<span class="festivo-tag" title="🎉 Festivo: ${escapeHtml(festivo.nombre)}">🎉</span>` : ''}
         <span class="day-number">${i}</span>
-        <span class="shift-label">${estados[nuevoEstado].texto}</span>
+        ${nuevoShiftHtml}
       `;
 
       actualizarBarraCambiosPendientes();
