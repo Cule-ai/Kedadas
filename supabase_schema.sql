@@ -17,9 +17,10 @@ create table if not exists public.perfiles (
   rol text not null default 'usuario',
   is_superadmin boolean not null default false,
   es_universitario boolean not null default false,
-  ciudad_origen text default 'Toledo',
+  ciudad_origen text default 'Plasencia',
   ciudad_universidad text,
   ubicacion_actual text default 'origen',
+  password text default '1234',
   created_at timestamptz not null default timezone('utc'::text, now())
 );
 
@@ -29,15 +30,17 @@ alter table public.perfiles add column if not exists email text;
 alter table public.perfiles add column if not exists rol text not null default 'usuario';
 alter table public.perfiles add column if not exists is_superadmin boolean not null default false;
 alter table public.perfiles add column if not exists current_location text not null default 'origen' check (current_location in ('origen', 'estudio/trabajo', 'viaje'));
-alter table public.perfiles add column if not exists ciudad_origen text default 'Toledo';
+alter table public.perfiles add column if not exists ciudad_origen text default 'Plasencia';
+alter table public.perfiles alter column ciudad_origen set default 'Plasencia';
 alter table public.perfiles add column if not exists ciudad_destino text default '';
 alter table public.perfiles add column if not exists ciudad_universidad text;
 alter table public.perfiles add column if not exists es_universitario boolean not null default false;
 alter table public.perfiles add column if not exists ubicacion_actual text default 'origen';
+alter table public.perfiles add column if not exists password text default '1234';
 alter table public.perfiles add column if not exists updated_at timestamptz not null default timezone('utc'::text, now());
 
--- Eliminar columna PIN de la base de datos (seguridad estricta Supabase Auth)
-alter table public.perfiles drop column if exists pin;
+-- Migrar perfiles existentes con Toledo o Cule a Plasencia
+update public.perfiles set ciudad_origen = 'Plasencia' where lower(nombre) = 'cule' or ciudad_origen = 'Toledo' or ciudad_origen is null;
 
 -- Enlazar user_id (UUID) con auth.users mediante coincidencia de email
 update public.perfiles p

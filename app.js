@@ -362,10 +362,10 @@ const STORAGE_PERFILES_KEY = 'kedadas_perfiles_v2';
 const STORAGE_USUARIOS_KEY = 'listaUsuarios';
 
 const PERFILES_DEFECTO = [
-  { id: 'Cule', nombre: 'Cule', rol: 'admin', es_universitario: false, ciudad_origen: 'Toledo', ciudad_universidad: 'Madrid', ubicacion_actual: 'origen' },
-  { id: 'Persona 2', nombre: 'Persona 2', rol: 'usuario', es_universitario: true, ciudad_origen: 'Toledo', ciudad_universidad: 'Madrid', ubicacion_actual: 'universidad' },
-  { id: 'Persona 3', nombre: 'Persona 3', rol: 'usuario', es_universitario: false, ciudad_origen: 'Toledo', ciudad_universidad: '', ubicacion_actual: 'origen' },
-  { id: 'Persona 4', nombre: 'Persona 4', rol: 'usuario', es_universitario: false, ciudad_origen: 'Toledo', ciudad_universidad: '', ubicacion_actual: 'origen' }
+  { id: 'Cule', nombre: 'Cule', rol: 'admin', es_universitario: false, ciudad_origen: 'Plasencia', ciudad_universidad: 'Madrid', ubicacion_actual: 'origen', password: '1234' },
+  { id: 'Persona 2', nombre: 'Persona 2', rol: 'usuario', es_universitario: true, ciudad_origen: 'Plasencia', ciudad_universidad: 'Madrid', ubicacion_actual: 'universidad', password: '1234' },
+  { id: 'Persona 3', nombre: 'Persona 3', rol: 'usuario', es_universitario: false, ciudad_origen: 'Plasencia', ciudad_universidad: '', ubicacion_actual: 'origen', password: '1234' },
+  { id: 'Persona 4', nombre: 'Persona 4', rol: 'usuario', es_universitario: false, ciudad_origen: 'Plasencia', ciudad_universidad: '', ubicacion_actual: 'origen', password: '1234' }
 ];
 
 let listaPerfiles = [];
@@ -429,10 +429,24 @@ async function cargarUsuariosDesdeBD() {
     listaPerfiles = [...PERFILES_DEFECTO];
   }
 
-  // Asegurar que Cule siempre exista
+  // Asegurar que Cule siempre exista con ubicación en Plasencia
   if (!listaPerfiles.some(p => p && p.nombre && p.nombre.toLowerCase() === 'cule')) {
-    listaPerfiles.unshift({ id: 'Cule', nombre: 'Cule', rol: 'admin' });
+    listaPerfiles.unshift({ id: 'Cule', nombre: 'Cule', rol: 'admin', ciudad_origen: 'Plasencia', password: '1234' });
   }
+
+  // Forzar que Cule y perfiles residuales usen Plasencia y tengan contraseña
+  listaPerfiles.forEach(p => {
+    if (!p) return;
+    if (p.nombre && p.nombre.toLowerCase() === 'cule') {
+      p.ciudad_origen = 'Plasencia';
+    } else if (p.ciudad_origen === 'Toledo' || !p.ciudad_origen) {
+      p.ciudad_origen = 'Plasencia';
+    }
+    if (!p.password) {
+      const stored = localStorage.getItem(`kedadas_pass_${(p.nombre || '').toLowerCase()}`);
+      p.password = stored || '1234';
+    }
+  });
 
   guardarPerfilesLocales();
 
@@ -443,21 +457,24 @@ async function cargarUsuariosDesdeBD() {
       data.forEach(dbPerfil => {
         if (!dbPerfil || !dbPerfil.nombre) return;
         const local = listaPerfiles.find(p => p && p.nombre && p.nombre.toLowerCase() === dbPerfil.nombre.toLowerCase());
+        const dbCiudadOrigen = (dbPerfil.nombre.toLowerCase() === 'cule' || dbPerfil.ciudad_origen === 'Toledo') ? 'Plasencia' : (dbPerfil.ciudad_origen || 'Plasencia');
         if (local) {
           if (dbPerfil.rol) local.rol = dbPerfil.rol;
           if (dbPerfil.es_universitario !== undefined) local.es_universitario = dbPerfil.es_universitario;
-          if (dbPerfil.ciudad_origen) local.ciudad_origen = dbPerfil.ciudad_origen;
+          local.ciudad_origen = dbCiudadOrigen;
           if (dbPerfil.ciudad_universidad) local.ciudad_universidad = dbPerfil.ciudad_universidad;
           if (dbPerfil.ubicacion_actual) local.ubicacion_actual = dbPerfil.ubicacion_actual;
+          if (dbPerfil.password) local.password = dbPerfil.password;
         } else {
           listaPerfiles.push({
             id: dbPerfil.id || dbPerfil.nombre,
             nombre: dbPerfil.nombre,
             rol: dbPerfil.rol || 'usuario',
             es_universitario: !!dbPerfil.es_universitario,
-            ciudad_origen: dbPerfil.ciudad_origen || 'Toledo',
+            ciudad_origen: dbCiudadOrigen,
             ciudad_universidad: dbPerfil.ciudad_universidad || '',
-            ubicacion_actual: dbPerfil.ubicacion_actual || 'origen'
+            ubicacion_actual: dbPerfil.ubicacion_actual || 'origen',
+            password: dbPerfil.password || '1234'
           });
         }
       });
@@ -466,6 +483,13 @@ async function cargarUsuariosDesdeBD() {
   } catch (err) {
     console.warn('Aviso sincronización Supabase perfiles:', err);
   }
+
+  // Sincronizar actualización de Plasencia en Supabase
+  try {
+    await supabaseApp.from('perfiles')
+      .update({ ciudad_origen: 'Plasencia' })
+      .or('ciudad_origen.eq.Toledo,nombre.ilike.cule');
+  } catch(e) {}
 
   try { renderizarSelectoresUsuarios(); } catch(e) { console.warn(e); }
   try { renderizarFiltroCoincidencias(); } catch(e) { console.warn(e); }
@@ -601,18 +625,98 @@ function poblarSelectorIdentidadUsuario() {
     selector.appendChild(opt);
   });
 
+// =========================================================================
+// --- GESTIÓN DE CONTRASEÑAS POR USUARIO Y PROTECCIÓN DE ACCESO -----------
+// =========================================================================
+function obtenerContrasenaUsuario(nombre) {
+  if (!nombre) return '1234';
+  const nombreLimpio = String(nombre).trim().toLowerCase();
+
+  // 1. Buscar en listaPerfiles
+  const p = (listaPerfiles || []).find(item => item && item.nombre && item.nombre.toLowerCase() === nombreLimpio);
+  if (p && p.password) return String(p.password).trim();
+
+  // 2. Buscar en almacenamiento local por usuario
+  try {
+    const custom = localStorage.getItem(`kedadas_pass_${nombreLimpio}`);
+    if (custom) return String(custom).trim();
+  } catch(e) {}
+
+  return '1234';
+}
+
+async function guardarContrasenaUsuario(nombre, nuevoPass) {
+  if (!nombre || !nuevoPass) return false;
+  const nombreLimpio = String(nombre).trim();
+  const passLimpio = String(nuevoPass).trim();
+
+  // 1. Actualizar perfil local
+  const p = (listaPerfiles || []).find(item => item && item.nombre && item.nombre.toLowerCase() === nombreLimpio.toLowerCase());
+  if (p) {
+    p.password = passLimpio;
+    guardarPerfilesLocales();
+  }
+
+  // 2. Guardar en localStorage
+  try {
+    localStorage.setItem(`kedadas_pass_${nombreLimpio.toLowerCase()}`, passLimpio);
+  } catch(e) {}
+
+  // 3. Sincronizar en Supabase
+  try {
+    await supabaseApp.from('perfiles').update({ password: passLimpio }).ilike('nombre', nombreLimpio);
+  } catch(e) {}
+
+  return true;
+}
+
+function verificarContrasenaUsuario(nombre, passIntroducido) {
+  if (!passIntroducido) return false;
+  const passCorrecto = obtenerContrasenaUsuario(nombre);
+  return String(passIntroducido).trim() === passCorrecto;
+}
+
+// Solicitar contraseña obligatoria antes de conmutar de usuario
+async function solicitarCambioUsuarioConContrasena(nuevoNombre) {
+  if (!nuevoNombre) return false;
+  const target = nuevoNombre.trim();
+  if (target.toLowerCase() === (usuarioLogueado || '').toLowerCase()) return true;
+
+  const pass = prompt(`🔒 Acceso Protegido por Contraseña\n\nIntroduce la contraseña de "${target}" para acceder a su cuenta y cuadrante:\n(Clave por defecto: 1234 si no la ha cambiado)`);
+
+  if (pass === null || pass === '') {
+    return false;
+  }
+
+  if (!verificarContrasenaUsuario(target, pass)) {
+    alert(`❌ Contraseña incorrecta para "${target}".\nPor motivos de privacidad, no puedes acceder al horario ni a la cuenta de este usuario.`);
+    return false;
+  }
+
+  cambiarUsuarioActivo(target);
+  if (typeof confetti === 'function') confetti({ particleCount: 40, spread: 60 });
+  alert(`✅ ¡Contraseña correcta! Has entrado como "${target}".`);
+  return true;
+}
+
   if (!selector.dataset.listenerAttached) {
     selector.dataset.listenerAttached = 'true';
-    selector.addEventListener('change', (e) => {
-      cambiarUsuarioActivo(e.target.value);
+    selector.addEventListener('change', async (e) => {
+      const nuevo = e.target.value;
+      if (!nuevo || nuevo.trim().toLowerCase() === (usuarioLogueado || '').toLowerCase()) return;
+      const ok = await solicitarCambioUsuarioConContrasena(nuevo);
+      if (!ok) {
+        poblarSelectorIdentidadUsuario();
+      }
     });
   }
 
   const btnConmutarCule = document.getElementById('btn-conmutar-a-cule');
   if (btnConmutarCule && !btnConmutarCule.dataset.listenerAttached) {
     btnConmutarCule.dataset.listenerAttached = 'true';
-    btnConmutarCule.addEventListener('click', () => {
-      cambiarUsuarioActivo('Cule');
+    btnConmutarCule.addEventListener('click', async () => {
+      if ((usuarioLogueado || '').toLowerCase() === 'cule') return;
+      await solicitarCambioUsuarioConContrasena('Cule');
     });
   }
 }
@@ -806,7 +910,7 @@ function obtenerIconoUbicacion(nombreUsuario) {
   const loc = normalizarUbicacion(p ? (p.current_location || p.ubicacion_actual) : 'origen');
   const isUniv = p && p.es_universitario;
   const ciudadDestino = (p && (p.ciudad_destino || p.ciudad_universidad)) || '';
-  const ciudadOrigen = (p && p.ciudad_origen) || 'Origen';
+  const ciudadOrigen = (p && p.ciudad_origen && p.ciudad_origen !== 'Toledo') ? p.ciudad_origen : 'Plasencia';
 
   if (loc === 'viaje') {
     return {
@@ -857,7 +961,8 @@ function actualizarSelectorUbicacionRapido() {
     badge.className = 'badge-ubi-status';
     if (loc === 'origen') {
       badge.classList.add('ubi-origen');
-      badge.textContent = `🏠 En Ciudad de Origen${p && p.ciudad_origen ? ' (' + p.ciudad_origen + ')' : ''}`;
+      const ciudadO = (p && p.ciudad_origen && p.ciudad_origen !== 'Toledo') ? p.ciudad_origen : 'Plasencia';
+      badge.textContent = `🏠 En Ciudad de Origen (${ciudadO})`;
     } else if (loc === 'viaje') {
       badge.classList.add('ubi-viaje');
       badge.textContent = `✈️ De Viaje / Fuera`;
@@ -1754,12 +1859,16 @@ async function crearYAnadirNuevoMiembroAGrupoActivo() {
     return alert(`"${nombre}" ya pertenece a este grupo.`);
   }
 
+  const inputPin = document.getElementById('input-nuevo-pin-miembro');
+  const passwordNueva = (inputPin?.value || '').trim() || '1234';
+
   // Si la persona no existe en la app, la creamos en listaPerfiles y Supabase
   if (!usuarios.some(u => String(u).toLowerCase() === nombre.toLowerCase())) {
-    listaPerfiles.push({ id: nombre, nombre, rol: 'usuario' });
+    listaPerfiles.push({ id: nombre, nombre, rol: 'usuario', ciudad_origen: 'Plasencia', password: passwordNueva });
     guardarPerfilesLocales();
     try {
-      await supabaseApp.from('perfiles').insert({ nombre, rol: 'usuario' });
+      localStorage.setItem(`kedadas_pass_${nombre.toLowerCase()}`, passwordNueva);
+      await supabaseApp.from('perfiles').insert({ nombre, rol: 'usuario', ciudad_origen: 'Plasencia', password: passwordNueva });
     } catch (e) {}
   }
 
@@ -1768,6 +1877,7 @@ async function crearYAnadirNuevoMiembroAGrupoActivo() {
   await sincronizarGrupoEnSupabase(grupo);
 
   if (inputNuevoNombreMiembro) inputNuevoNombreMiembro.value = '';
+  if (inputPin) inputPin.value = '';
 
   renderizarSelectorGrupos();
   renderizarPanelGestionGrupoActivo();
@@ -2947,15 +3057,43 @@ async function renderizarMes() {
     calendarGrid.innerHTML = `
       <div class="bloqueo-privacidad-calendario">
         <div class="icono-candado">🔒</div>
-        <h3>Calendario Privado</h3>
+        <h3>Horario Protegido por Contraseña</h3>
         <p>No tienes autorización para ver el calendario de <strong>${escapeHtml(miUsuario)}</strong>.</p>
-        <span class="subtexto-privacidad">Por políticas de privacidad, cada usuario solo puede ver su propio horario. <strong>${escapeHtml(miUsuario)}</strong> debe otorgarte permiso o invitarte para que puedas ver sus turnos de trabajo.</span>
+        <span class="subtexto-privacidad">Cada usuario tiene su horario protegido por contraseña. Puedes desbloquearlo introduciendo su clave personal o pidiéndole que te invite.</span>
+        
+        <div class="desbloqueo-pass-form-box">
+          <input type="password" id="input-desbloquear-cal-pass" placeholder="Contraseña de ${escapeHtml(miUsuario)}">
+          <button type="button" id="btn-desbloquear-cal-pass">🔑 Desbloquear Horario</button>
+        </div>
+
         <div style="display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 15px;">
           <button type="button" id="btn-volver-mi-cal" style="padding: 10px 18px; border-radius: 12px; cursor: pointer; font-weight: 700; background: linear-gradient(135deg, #4f46e5, #6366f1); color: #fff; border: none; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);">👤 Volver a mi calendario (${escapeHtml(usuarioLogueado || 'Mi usuario')})</button>
           <button type="button" id="btn-pedir-compartir-cal" style="padding: 10px 18px; border-radius: 12px; cursor: pointer; font-weight: 700; background: #fff; color: #475569; border: 1.5px solid #cbd5e1;">💬 Pedir a ${escapeHtml(miUsuario)} que me comparta su horario</button>
         </div>
       </div>
     `;
+
+    const btnDesbloquear = document.getElementById('btn-desbloquear-cal-pass');
+    const inputPass = document.getElementById('input-desbloquear-cal-pass');
+    if (btnDesbloquear && inputPass) {
+      btnDesbloquear.addEventListener('click', async () => {
+        const pass = (inputPass.value || '').trim();
+        if (!pass) return alert(`Por favor, introduce la contraseña de "${miUsuario}".`);
+        if (verificarContrasenaUsuario(miUsuario, pass)) {
+          await concederPermisoCalendario(miUsuario, usuarioLogueado);
+          if (typeof confetti === 'function') confetti({ particleCount: 50, spread: 70 });
+          alert(`🎉 ¡Contraseña correcta! Horario de "${miUsuario}" desbloqueado en modo lectura.`);
+          iniciarCalendario();
+          renderizarSelectoresUsuarios();
+        } else {
+          alert(`❌ Contraseña incorrecta para "${miUsuario}". El horario permanece bloqueado.`);
+        }
+      });
+      inputPass.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') btnDesbloquear.click();
+      });
+    }
+
     const btnVolver = document.getElementById('btn-volver-mi-cal');
     if (btnVolver) {
       btnVolver.addEventListener('click', () => {
@@ -3098,15 +3236,43 @@ async function renderizarAno() {
     vistaAnualContainer.innerHTML = `
       <div class="bloqueo-privacidad-calendario" style="margin: 30px auto; max-width: 500px;">
         <div class="icono-candado">🔒</div>
-        <h3>Calendario Anual Privado</h3>
+        <h3>Horario Anual Protegido por Contraseña</h3>
         <p>No tienes autorización para ver el calendario anual de <strong>${escapeHtml(miUsuario)}</strong>.</p>
-        <span class="subtexto-privacidad">Por políticas de privacidad, cada usuario solo puede ver su propio horario. <strong>${escapeHtml(miUsuario)}</strong> debe otorgarte permiso para consultar su cuadrante.</span>
+        <span class="subtexto-privacidad">Cada usuario tiene su horario protegido por contraseña. Puedes desbloquearlo introduciendo su clave personal o pidiéndole que te invite.</span>
+        
+        <div class="desbloqueo-pass-form-box">
+          <input type="password" id="input-desbloquear-cal-pass-ano" placeholder="Contraseña de ${escapeHtml(miUsuario)}">
+          <button type="button" id="btn-desbloquear-cal-pass-ano">🔑 Desbloquear Horario</button>
+        </div>
+
         <div style="display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 15px;">
           <button type="button" id="btn-volver-mi-cal-ano" style="padding: 10px 18px; border-radius: 12px; cursor: pointer; font-weight: 700; background: linear-gradient(135deg, #4f46e5, #6366f1); color: #fff; border: none; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);">👤 Volver a mi calendario</button>
           <button type="button" id="btn-pedir-compartir-cal-ano" style="padding: 10px 18px; border-radius: 12px; cursor: pointer; font-weight: 700; background: #fff; color: #475569; border: 1.5px solid #cbd5e1;">💬 Pedir a ${escapeHtml(miUsuario)} que me comparta su horario</button>
         </div>
       </div>
     `;
+
+    const btnDesbloquearAno = document.getElementById('btn-desbloquear-cal-pass-ano');
+    const inputPassAno = document.getElementById('input-desbloquear-cal-pass-ano');
+    if (btnDesbloquearAno && inputPassAno) {
+      btnDesbloquearAno.addEventListener('click', async () => {
+        const pass = (inputPassAno.value || '').trim();
+        if (!pass) return alert(`Por favor, introduce la contraseña de "${miUsuario}".`);
+        if (verificarContrasenaUsuario(miUsuario, pass)) {
+          await concederPermisoCalendario(miUsuario, usuarioLogueado);
+          if (typeof confetti === 'function') confetti({ particleCount: 50, spread: 70 });
+          alert(`🎉 ¡Contraseña correcta! Horario de "${miUsuario}" desbloqueado en modo lectura.`);
+          iniciarCalendario();
+          renderizarSelectoresUsuarios();
+        } else {
+          alert(`❌ Contraseña incorrecta para "${miUsuario}". El horario permanece bloqueado.`);
+        }
+      });
+      inputPassAno.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') btnDesbloquearAno.click();
+      });
+    }
+
     const btnVolver = document.getElementById('btn-volver-mi-cal-ano');
     if (btnVolver) {
       btnVolver.addEventListener('click', () => {
@@ -5320,10 +5486,16 @@ function inicializarModoUniversitarioPerfil() {
     const usuarioABuscar = miUsuario || usuarioLogueado || 'Cule';
     const miPerfil = listaPerfiles.find(p => p.nombre.toLowerCase() === usuarioABuscar.toLowerCase());
     if (!miPerfil) return;
+    
+    // Forzar Plasencia para Cule o perfiles con Toledo residual
+    if (miPerfil.nombre.toLowerCase() === 'cule' || miPerfil.ciudad_origen === 'Toledo' || !miPerfil.ciudad_origen) {
+      miPerfil.ciudad_origen = 'Plasencia';
+    }
+
     const esUniv = !!miPerfil.es_universitario;
     if (checkUniv) checkUniv.checked = esUniv;
     if (cajaCampos) cajaCampos.style.display = esUniv ? 'block' : 'none';
-    if (inputOrigen) inputOrigen.value = miPerfil.ciudad_origen || 'Toledo';
+    if (inputOrigen) inputOrigen.value = miPerfil.ciudad_origen || 'Plasencia';
     if (inputUniv) inputUniv.value = miPerfil.ciudad_universidad || '';
     
     ubicacionSeleccionada = miPerfil.ubicacion_actual || 'origen';
@@ -5331,6 +5503,31 @@ function inicializarModoUniversitarioPerfil() {
       btnUbiOrigen.classList.toggle('activo', ubicacionSeleccionada === 'origen');
       btnUbiUniv.classList.toggle('activo', ubicacionSeleccionada === 'universidad');
     }
+
+    // Cargar clave actual del usuario en la tarjeta de contraseña
+    const inputMiPass = document.getElementById('input-mi-password-perfil');
+    if (inputMiPass) {
+      inputMiPass.value = obtenerContrasenaUsuario(usuarioABuscar);
+    }
+  }
+
+  // Guardar contraseña de horario desde la tarjeta del perfil
+  const btnGuardarMiPass = document.getElementById('btn-guardar-mi-password');
+  const inputMiPass = document.getElementById('input-mi-password-perfil');
+  if (btnGuardarMiPass && inputMiPass && !btnGuardarMiPass.dataset.listenerAttached) {
+    btnGuardarMiPass.dataset.listenerAttached = 'true';
+    btnGuardarMiPass.addEventListener('click', async () => {
+      const nuevoPass = (inputMiPass.value || '').trim();
+      if (!nuevoPass || nuevoPass.length < 3) {
+        return alert('Por favor, escribe una contraseña válida de al menos 3 caracteres.');
+      }
+      const yo = usuarioLogueado || miUsuario || 'Cule';
+      btnGuardarMiPass.textContent = 'Guardando...';
+      await guardarContrasenaUsuario(yo, nuevoPass);
+      btnGuardarMiPass.textContent = '💾 Guardar Clave';
+      if (typeof confetti === 'function') confetti({ particleCount: 30, spread: 60 });
+      alert(`✅ ¡Contraseña de "${yo}" actualizada con éxito!\nAhora tu cuadrante está protegido con tu nueva clave de acceso.`);
+    });
   }
 
   if (checkUniv) {
@@ -5360,7 +5557,7 @@ function inicializarModoUniversitarioPerfil() {
       const miPerfil = listaPerfiles.find(p => p.nombre.toLowerCase() === usuarioABuscar.toLowerCase());
       if (!miPerfil) return;
       miPerfil.es_universitario = checkUniv ? checkUniv.checked : false;
-      miPerfil.ciudad_origen = inputOrigen ? inputOrigen.value.trim() : 'Toledo';
+      miPerfil.ciudad_origen = inputOrigen ? (inputOrigen.value.trim() || 'Plasencia') : 'Plasencia';
       miPerfil.ciudad_universidad = inputUniv ? inputUniv.value.trim() : '';
       miPerfil.ubicacion_actual = ubicacionSeleccionada;
 

@@ -47,7 +47,7 @@ export default function GroupMatchesLocationView({
       name,
       avatarUrl: found?.avatarUrl,
       location: found?.location || 'origen',
-      ciudad_origen: found?.ciudad_origen || 'Toledo',
+      ciudad_origen: found?.ciudad_origen || 'Plasencia',
       ciudad_destino: found?.ciudad_destino || ''
     };
   });
@@ -148,7 +148,7 @@ export default function GroupMatchesLocationView({
             })}
           </ul>
           <div className="text-[11px] bg-white/70 dark:bg-slate-900/60 p-2.5 rounded-lg border-l-4 border-amber-500 font-medium text-amber-950 dark:text-amber-200">
-            💡 <strong>Consejo para la Kedada:</strong> Coordinad si los desplazados bajan a la ciudad de origen ({activeMembers[0]?.ciudad_origen || 'Toledo'}) o si el resto organiza una visita a su ciudad de estudio/trabajo.
+            💡 <strong>Consejo para la Kedada:</strong> Coordinad si los desplazados bajan a la ciudad de origen ({activeMembers[0]?.ciudad_origen || 'Plasencia'}) o si el resto organiza una visita a su ciudad de estudio/trabajo.
           </div>
         </div>
       ) : (

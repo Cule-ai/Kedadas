@@ -4012,6 +4012,93 @@ body.dark-theme .btn-toggle-permiso-mini.revocar {
   border-color: #b91c1c;
 }
 
+/* ==========================================================================
+   DESBLOQUEO DE HORARIO POR CONTRASEÑA & GESTIÓN DE CLAVES
+   ========================================================================== */
+.desbloqueo-pass-form-box {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin: 16px auto;
+  max-width: 420px;
+  width: 100%;
+}
+
+.desbloqueo-pass-form-box input {
+  flex: 1;
+  min-width: 180px;
+  padding: 10px 14px;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 12px;
+  font-size: 0.92rem;
+  background: #ffffff;
+  color: #1e293b;
+  font-family: inherit;
+  transition: border-color 0.2s;
+}
+
+.desbloqueo-pass-form-box input:focus {
+  outline: none;
+  border-color: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
+}
+
+.desbloqueo-pass-form-box button {
+  padding: 10px 18px;
+  border-radius: 12px;
+  cursor: pointer;
+  font-weight: 800;
+  font-size: 0.88rem;
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: #fff;
+  border: none;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.desbloqueo-pass-form-box button:hover {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+}
+
+.desbloqueo-pass-form-box button:active {
+  transform: scale(0.97);
+}
+
+body.dark-theme .desbloqueo-pass-form-box input {
+  background: #0f172a;
+  border-color: #334155;
+  color: #f1f5f9;
+}
+
+.box-cambiar-password-perfil {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(248, 250, 252, 0.95));
+  border: 1.5px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 18px 20px;
+  margin-top: 15px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.04);
+}
+
+body.dark-theme .box-cambiar-password-perfil {
+  background: linear-gradient(135deg, #1e293b, #0f172a);
+  border-color: #334155;
+}
+
+.form-cambiar-password-row input {
+  background: #ffffff;
+  color: #1e293b;
+}
+
+body.dark-theme .form-cambiar-password-row input {
+  background: #0f172a;
+  border-color: #334155;
+  color: #f1f5f9;
+}
+
+
 
 
 

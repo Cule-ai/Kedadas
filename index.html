@@ -397,7 +397,7 @@
               <label for="input-nuevo-nombre-miembro">Crear e invitar nueva persona:</label>
               <div class="anadir-input-row">
                 <input type="text" id="input-nuevo-nombre-miembro" placeholder="Nombre (ej: Laura)" maxlength="20">
-                <input type="password" id="input-nuevo-pin-miembro" placeholder="PIN (4 núm)" maxlength="4" inputmode="numeric" style="width: 105px;">
+                <input type="password" id="input-nuevo-pin-miembro" placeholder="Clave (ej: 1234)" maxlength="20" style="width: 125px;">
                 <button type="button" id="btn-crear-y-anadir-miembro" class="btn-sec-primario-sm">➕ Crear y Añadir</button>
               </div>
             </div>
@@ -469,6 +469,23 @@
         </div>
       </div>
 
+      <!-- Tarjeta de Contraseña Personal del Usuario -->
+      <div class="card-modo-universitario box-cambiar-password-perfil" style="margin-top: 15px;">
+        <div class="univ-header-card">
+          <div class="univ-icon-title">
+            <span class="univ-icon-badge" style="background: rgba(99, 102, 241, 0.15); color: #6366f1;">🔑</span>
+            <div>
+              <h4>Mi Contraseña de Acceso al Horario</h4>
+              <p class="univ-sub">Protege tu horario para que nadie pueda ver tus turnos ni entrar a tu cuenta sin tu clave.</p>
+            </div>
+          </div>
+        </div>
+        <div class="form-cambiar-password-row" style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px;">
+          <input type="password" id="input-mi-password-perfil" placeholder="Nueva contraseña / PIN (ej: 1234)" maxlength="30" style="flex: 1; min-width: 180px; padding: 10px 14px; border: 1.5px solid #cbd5e1; border-radius: 12px; font-size: 0.92rem;">
+          <button type="button" id="btn-guardar-mi-password" class="btn-sec-primario-sm" style="padding: 10px 18px; border-radius: 12px; font-weight: 700;">💾 Guardar Clave</button>
+        </div>
+      </div>
+
       <!-- Tarjeta de Modo Universitario y Ubicación Personal -->
       <div class="card-modo-universitario" id="card-modo-universitario">
         <div class="univ-header-card">
@@ -489,7 +506,7 @@
           <div class="fila-inputs-ciudades">
             <div class="campo-ciudad-item">
               <label for="input-ciudad-origen">🏠 Ciudad / Pueblo de Origen:</label>
-              <input type="text" id="input-ciudad-origen" placeholder="Ej: Toledo" maxlength="35">
+              <input type="text" id="input-ciudad-origen" placeholder="Ej: Plasencia" maxlength="35">
             </div>
             <div class="campo-ciudad-item">
               <label for="input-ciudad-univ">🎓 Ciudad Universitaria / Campus:</label>
