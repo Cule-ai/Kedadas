@@ -1,5 +1,5 @@
 -- =========================================================================
--- ESQUEMA PROFESIONAL KEDADAS: PRIVACIDAD ESTRICTA (RLS) & SISTEMA DE GRUPOS
+-- ESQUEMA PROFESIONAL KEDADAS: JERARQUÍA DE ROLES, RLS Y SISTEMA DE INVITACIONES
 -- Compatible con Supabase PostgreSQL 15+ y Supabase Auth
 -- =========================================================================
 
@@ -7,19 +7,95 @@
 create extension if not exists "uuid-ossp";
 
 -- =========================================================================
--- SECCIÓN 1: SISTEMA DE GRUPOS PRIVADOS (Zero-Visibility para no miembros)
+-- SECCIÓN 1: ROLES Y SUPERADMINISTRADOR GLOBAL (Cule)
 -- =========================================================================
 
--- Tabla principal de grupos
+-- Tabla de perfiles con soporte para rol de superadmin
+create table if not exists public.perfiles (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users(id) on delete cascade unique,
+  nombre text not null unique,
+  email text,
+  pin text,
+  rol text not null default 'usuario', -- 'superadmin', 'admin', 'usuario'
+  is_superadmin boolean not null default false,
+  created_at timestamptz not null default timezone('utc'::text, now())
+);
+
+-- Asegurar columna is_superadmin si la tabla ya existía
+alter table public.perfiles add column if not exists is_superadmin boolean not null default false;
+
+-- DESIGNAR A "Cule" COMO ÚNICO SUPERADMINISTRADOR GLOBAL
+update public.perfiles
+set is_superadmin = true, rol = 'superadmin'
+where lower(nombre) = 'cule' or lower(email) = 'maculecale@gmail.com';
+
+-- Función SECURITY DEFINER para verificar si el llamador es Superadministrador
+create or replace function public.is_superadmin()
+returns boolean
+language sql
+security definer
+set search_path = public, auth
+stable
+as $$
+  select exists (
+    select 1
+    from public.perfiles p
+    where p.user_id = auth.uid()
+      and (p.is_superadmin = true or lower(p.nombre) = 'cule' or lower(p.email) = 'maculecale@gmail.com')
+  );
+$$;
+
+-- Trigger: Asignar superadmin automáticamente si el email o nombre coincide con Cule
+create or replace function public.handle_new_user_roles()
+returns trigger as $$
+declare
+  v_nombre text;
+  v_email text;
+  v_es_superadmin boolean := false;
+begin
+  v_email := lower(coalesce(new.email, ''));
+  v_nombre := lower(coalesce(new.raw_user_meta_data->>'nombre', split_part(v_email, '@', 1)));
+
+  if v_nombre = 'cule' or v_email = 'maculecale@gmail.com' then
+    v_es_superadmin := true;
+  end if;
+
+  insert into public.perfiles (user_id, email, nombre, rol, is_superadmin)
+  values (
+    new.id,
+    new.email,
+    coalesce(new.raw_user_meta_data->>'nombre', split_part(new.email, '@', 1)),
+    case when v_es_superadmin then 'superadmin' else 'usuario' end,
+    v_es_superadmin
+  )
+  on conflict (user_id) do update set
+    email = excluded.email,
+    is_superadmin = excluded.is_superadmin or public.perfiles.is_superadmin,
+    rol = case when excluded.is_superadmin or public.perfiles.is_superadmin then 'superadmin' else public.perfiles.rol end;
+  return new;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute procedure public.handle_new_user_roles();
+
+-- =========================================================================
+-- SECCIÓN 2: GESTIÓN DE GRUPOS Y MEMBRESÍAS
+-- =========================================================================
+
 create table if not exists public.groups (
   id uuid primary key default gen_random_uuid(),
   name text not null,
+  icono text default '👥',
+  description text,
   created_by uuid not null references auth.users(id) on delete cascade,
   created_at timestamptz not null default timezone('utc'::text, now()),
   updated_at timestamptz not null default timezone('utc'::text, now())
 );
 
--- Tabla de membresía y roles en grupos
 create table if not exists public.group_members (
   id uuid primary key default gen_random_uuid(),
   group_id uuid not null references public.groups(id) on delete cascade,
@@ -29,16 +105,10 @@ create table if not exists public.group_members (
   constraint unique_group_user unique (group_id, user_id)
 );
 
--- Índices de alto rendimiento para RLS y cruces
 create index if not exists idx_group_members_user on public.group_members(user_id);
 create index if not exists idx_group_members_group on public.group_members(group_id);
-create index if not exists idx_groups_created_by on public.groups(created_by);
 
--- =========================================================================
--- FUNCIONES AUXILIARES (SECURITY DEFINER) PARA PREVENIR RECURSIÓN INFINITA EN RLS
--- =========================================================================
-
--- Comprueba si el usuario pertenece al grupo sin disparar bucles de RLS
+-- Funciones auxiliares SECURITY DEFINER para evitar recursión en RLS
 create or replace function public.is_group_member(p_group_id uuid, p_user_id uuid)
 returns boolean
 language sql
@@ -54,7 +124,6 @@ as $$
   );
 $$;
 
--- Comprueba si el usuario es administrador del grupo
 create or replace function public.is_group_admin(p_group_id uuid, p_user_id uuid)
 returns boolean
 language sql
@@ -71,7 +140,7 @@ as $$
   );
 $$;
 
--- Trigger: Cuando un usuario crea un grupo, se le asigna automáticamente el rol 'admin'
+-- Trigger: El creador del grupo se convierte automáticamente en group_admin
 create or replace function public.handle_group_creator()
 returns trigger
 language plpgsql
@@ -92,262 +161,192 @@ create trigger on_group_created
   for each row execute function public.handle_group_creator();
 
 -- =========================================================================
--- RLS (ROW LEVEL SECURITY) PARA GRUPOS Y MIEMBROS
+-- SECCIÓN 3: SISTEMA DE INVITACIONES CON CÓDIGO ÚNICO (KED-XXXX)
 -- =========================================================================
-alter table public.groups enable row level security;
-alter table public.group_members enable row level security;
 
--- POLÍTICAS: groups
--- 1. SELECT: Solo visible si el usuario autenticado es miembro del grupo
-create policy "groups_select_members_only"
-  on public.groups
-  for select
-  to authenticated
-  using (public.is_group_member(id, auth.uid()));
+create table if not exists public.group_invitations (
+  id uuid primary key default gen_random_uuid(),
+  group_id uuid not null references public.groups(id) on delete cascade,
+  code text not null unique, -- Ej: KED-A7X9
+  created_by uuid not null references auth.users(id) on delete cascade,
+  expires_at timestamptz default (now() + interval '30 days'),
+  max_uses integer default null, -- null = usos ilimitados
+  uses_count integer not null default 0,
+  is_active boolean not null default true,
+  created_at timestamptz not null default timezone('utc'::text, now())
+);
 
--- 2. INSERT: Cualquier usuario autenticado puede crear un grupo
-create policy "groups_insert_authenticated"
-  on public.groups
-  for insert
-  to authenticated
-  with check (created_by = auth.uid());
+create index if not exists idx_invitations_code on public.group_invitations(code);
+create index if not exists idx_invitations_group on public.group_invitations(group_id);
 
--- 3. UPDATE: Solo los administradores del grupo pueden modificar datos
-create policy "groups_update_admin_only"
-  on public.groups
-  for update
-  to authenticated
-  using (public.is_group_admin(id, auth.uid()))
-  with check (public.is_group_admin(id, auth.uid()));
+-- Función RPC para generar un código único de invitación (Solo Admin del grupo o Superadmin)
+create or replace function public.create_group_invitation(
+  p_group_id uuid,
+  p_custom_code text default null,
+  p_max_uses integer default null,
+  p_days_valid integer default 30
+)
+returns json
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+declare
+  v_caller_id uuid := auth.uid();
+  v_code text;
+  v_invitation public.group_invitations%rowtype;
+begin
+  -- 1. Verificar autorización: Superadmin o Admin de este grupo
+  if not (public.is_superadmin() or public.is_group_admin(p_group_id, v_caller_id)) then
+    raise exception 'Acceso denegado: Solo el administrador del grupo puede generar invitaciones.';
+  end if;
 
--- 4. DELETE: Solo el administrador puede disolver (eliminar) el grupo
-create policy "groups_delete_admin_only"
-  on public.groups
-  for delete
-  to authenticated
-  using (public.is_group_admin(id, auth.uid()));
+  -- 2. Si se proporciona código personalizado, sanitizarlo; si no, generar uno aleatorio
+  if p_custom_code is not null and length(trim(p_custom_code)) >= 4 then
+    v_code := upper(trim(p_custom_code));
+  else
+    v_code := 'KED-' || upper(substr(md5(random()::text || clock_timestamp()::text), 1, 4));
+  end if;
 
--- POLÍTICAS: group_members
--- 1. SELECT: Solo los miembros del grupo pueden ver a sus compañeros
-create policy "group_members_select_peer_members"
-  on public.group_members
-  for select
-  to authenticated
-  using (public.is_group_member(group_id, auth.uid()));
+  -- 3. Insertar o actualizar código activo
+  insert into public.group_invitations (
+    group_id,
+    code,
+    created_by,
+    expires_at,
+    max_uses,
+    is_active
+  )
+  values (
+    p_group_id,
+    v_code,
+    v_caller_id,
+    now() + (p_days_valid || ' days')::interval,
+    p_max_uses,
+    true
+  )
+  on conflict (code) do update set
+    expires_at = excluded.expires_at,
+    is_active = true
+  returning * into v_invitation;
 
--- 2. INSERT: El admin del grupo puede invitar/añadir miembros (o el usuario unirse)
-create policy "group_members_insert_admin_or_self"
-  on public.group_members
-  for insert
-  to authenticated
-  with check (
-    public.is_group_admin(group_id, auth.uid())
-    or user_id = auth.uid()
+  return json_build_object(
+    'success', true,
+    'code', v_invitation.code,
+    'group_id', v_invitation.group_id,
+    'expires_at', v_invitation.expires_at
   );
+end;
+$$;
 
--- 3. UPDATE: Solo el admin puede promover/degradar roles
-create policy "group_members_update_admin_only"
-  on public.group_members
-  for update
-  to authenticated
-  using (public.is_group_admin(group_id, auth.uid()))
-  with check (public.is_group_admin(group_id, auth.uid()));
+-- Función RPC para unirse a un grupo mediante código de invitación
+create or replace function public.join_group_with_code(p_code text)
+returns json
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+declare
+  v_caller_id uuid := auth.uid();
+  v_invitation record;
+  v_group record;
+  v_clean_code text;
+begin
+  -- 1. Validar autenticación
+  if v_caller_id is null then
+    raise exception 'Debes iniciar sesión para unirte a un grupo.';
+  end if;
 
--- 4. DELETE: Un miembro puede abandonar el grupo, o el admin expulsar a un miembro
-create policy "group_members_delete_self_or_admin"
-  on public.group_members
-  for delete
-  to authenticated
-  using (
-    user_id = auth.uid()
-    or public.is_group_admin(group_id, auth.uid())
+  v_clean_code := upper(trim(p_code));
+
+  -- 2. Buscar invitación activa y válida
+  select gi.*, g.name as group_name, g.icono as group_icono
+  into v_invitation
+  from public.group_invitations gi
+  join public.groups g on g.id = gi.group_id
+  where gi.code = v_clean_code
+    and gi.is_active = true
+    and (gi.expires_at is null or gi.expires_at > now())
+    and (gi.max_uses is null or gi.uses_count < gi.max_uses);
+
+  if v_invitation is null then
+    raise exception 'Código de invitación inválido o caducado.';
+  end if;
+
+  -- 3. Comprobar si ya es miembro
+  if public.is_group_member(v_invitation.group_id, v_caller_id) then
+    return json_build_object(
+      'success', true,
+      'already_member', true,
+      'message', 'Ya perteneces a este grupo.',
+      'group_id', v_invitation.group_id,
+      'group_name', v_invitation.group_name
+    );
+  end if;
+
+  -- 4. Añadir a group_members
+  insert into public.group_members (group_id, user_id, role)
+  values (v_invitation.group_id, v_caller_id, 'member');
+
+  -- 5. Incrementar contador de usos
+  update public.group_invitations
+  set uses_count = uses_count + 1
+  where id = v_invitation.id;
+
+  return json_build_object(
+    'success', true,
+    'already_member', false,
+    'message', '¡Te has unido con éxito al grupo!',
+    'group_id', v_invitation.group_id,
+    'group_name', v_invitation.group_name,
+    'role', 'member'
   );
+end;
+$$;
 
 -- =========================================================================
--- SECCIÓN 2: PRIVACIDAD DE HORARIOS (schedules & schedule_permissions)
+-- SECCIÓN 4: HORARIOS Y COINCIDENCIAS SEGURAS (Zero-Knowledge)
 -- =========================================================================
 
--- Tabla de horarios individuales
 create table if not exists public.schedules (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
   date date not null,
-  shift_type text not null, -- 'M' (Mañana), 'T' (Tarde), 'N' (Noche), 'L' (Libre), 'V' (Vacaciones)
-  is_free boolean not null default false, -- true si shift_type = 'L'
+  shift_type text not null, -- 'M', 'T', 'N', 'L', 'V'
+  is_free boolean not null default false,
   notes text,
   created_at timestamptz not null default timezone('utc'::text, now()),
   updated_at timestamptz not null default timezone('utc'::text, now()),
   constraint unique_user_date unique (user_id, date)
 );
 
--- =========================================================================
--- TABLA DE AUTORIZACIONES EXPLÍCITAS: calendar_permissions
--- grantor_id = quien da el permiso (dueño del calendario)
--- grantee_id = quien recibe el permiso (quien puede leerlo)
--- =========================================================================
-create table if not exists public.calendar_permissions (
-  id uuid primary key default gen_random_uuid(),
-  grantor_id uuid not null references auth.users(id) on delete cascade,
-  grantee_id uuid not null references auth.users(id) on delete cascade,
-  created_at timestamptz not null default timezone('utc'::text, now()),
-  constraint unique_grantor_grantee unique (grantor_id, grantee_id),
-  constraint no_self_grant check (grantor_id <> grantee_id)
-);
-
-create index if not exists idx_calendar_perms_grantor on public.calendar_permissions(grantor_id);
-create index if not exists idx_calendar_perms_grantee on public.calendar_permissions(grantee_id);
 create index if not exists idx_schedules_user_date on public.schedules(user_id, date);
 create index if not exists idx_schedules_free_date on public.schedules(date) where is_free = true;
 
--- Función de seguridad (SECURITY DEFINER) para comprobar acceso sin recursión
-create or replace function public.has_calendar_access(target_user_id uuid, target_username text)
-returns boolean
-language sql
-security definer
-set search_path = public
-stable
-as $$
-  select (
-    -- Caso A: Es mi propio calendario
-    (auth.uid() is not null and (
-      target_user_id = auth.uid()
-      or exists (select 1 from public.perfiles p where p.user_id = auth.uid() and lower(p.nombre) = lower(target_username))
-    ))
-    -- Caso B: El dueño me ha otorgado permiso en calendar_permissions
-    or exists (
-      select 1 from public.calendar_permissions cp
-      where cp.grantee_id = auth.uid()
-        and (
-          cp.grantor_id = target_user_id
-          or exists (select 1 from public.perfiles p where p.user_id = cp.grantor_id and lower(p.nombre) = lower(target_username))
-        )
-    )
-  );
-$$;
+-- Tabla histórica "Turnos" (mantenida para retrocompatibilidad total)
+create table if not exists public."Turnos" (
+  id bigint generated by default as identity primary key,
+  dia integer not null,
+  usuario text not null,
+  usuario_id uuid references auth.users(id) on delete set null,
+  indiceEstado integer not null default 0,
+  mes_anio text not null,
+  grupo text default 'Amigos',
+  created_at timestamptz not null default timezone('utc'::text, now()),
+  constraint unique_usuario_dia_mes unique (usuario, dia, mes_anio)
+);
 
--- =========================================================================
--- ACTIVACIÓN Y FORCE ROW LEVEL SECURITY (RLS)
--- =========================================================================
-alter table public.calendar_permissions enable row level security;
-alter table public.calendar_permissions force row level security;
-
-alter table public.schedules enable row level security;
-alter table public.schedules force row level security;
-
--- También asegurar tabla "Turnos" si existe
-alter table if exists public."Turnos" enable row level security;
-alter table if exists public."Turnos" force row level security;
-
--- ELIMINAR CUALQUIER POLÍTICA ANTERIOR PERMISIVA DE TIPO SELECT
-drop policy if exists "Lectura abierta de cuadrantes" on public."Turnos";
-drop policy if exists "Lectura de turnos" on public."Turnos";
-drop policy if exists "Permitir select a todos" on public."Turnos";
-drop policy if exists "turnos_select_policy" on public."Turnos";
-drop policy if exists "schedules_select_own_or_permitted" on public.schedules;
-drop policy if exists "schedules_select_all" on public.schedules;
-
--- POLÍTICAS: calendar_permissions
-create policy "calendar_permissions_select"
-  on public.calendar_permissions
-  for select
-  to authenticated
-  using (grantor_id = auth.uid() or grantee_id = auth.uid());
-
-create policy "calendar_permissions_insert"
-  on public.calendar_permissions
-  for insert
-  to authenticated
-  with check (grantor_id = auth.uid());
-
-create policy "calendar_permissions_delete"
-  on public.calendar_permissions
-  for delete
-  to authenticated
-  using (grantor_id = auth.uid() or grantee_id = auth.uid());
-
--- POLÍTICAS ESTRICTAS: schedules
-create policy "schedules_select_strict"
-  on public.schedules
-  for select
-  to authenticated
-  using (
-    user_id = auth.uid()
-    or exists (
-      select 1 from public.calendar_permissions cp
-      where cp.grantor_id = schedules.user_id
-        and cp.grantee_id = auth.uid()
-    )
-  );
-
-create policy "schedules_insert_own_only"
-  on public.schedules
-  for insert
-  to authenticated
-  with check (user_id = auth.uid());
-
-create policy "schedules_update_own_only"
-  on public.schedules
-  for update
-  to authenticated
-  using (user_id = auth.uid())
-  with check (user_id = auth.uid());
-
-create policy "schedules_delete_own_only"
-  on public.schedules
-  for delete
-  to authenticated
-  using (user_id = auth.uid());
-
--- POLÍTICAS ESTRICTAS PARA "Turnos" (Utilizada actualmente en la PWA)
-create policy "turnos_select_strict"
-  on public."Turnos"
-  for select
-  to authenticated
-  using (public.has_calendar_access("Turnos".usuario_id, "Turnos".usuario));
-
-create policy "turnos_insert_own"
-  on public."Turnos"
-  for insert
-  to authenticated
-  with check (
-    usuario_id = auth.uid()
-    or usuario = (select p.nombre from public.perfiles p where p.user_id = auth.uid())
-  );
-
-create policy "turnos_update_own"
-  on public."Turnos"
-  for update
-  to authenticated
-  using (
-    usuario_id = auth.uid()
-    or usuario = (select p.nombre from public.perfiles p where p.user_id = auth.uid())
-  );
-
-create policy "turnos_delete_own"
-  on public."Turnos"
-  for delete
-  to authenticated
-  using (
-    usuario_id = auth.uid()
-    or usuario = (select p.nombre from public.perfiles p where p.user_id = auth.uid())
-  );
-
--- =========================================================================
--- SECCIÓN 3: FUNCIÓN RPC get_free_days_matches (Zero-Knowledge Coincidencias)
--- =========================================================================
--- Cruza los días libres del llamador con sus compañeros sin exponer turnos de trabajo
-create or replace function public.get_free_days_matches(
-  p_group_id uuid default null,
+-- RPC: Coincidencias de días libres del grupo (ZERO-KNOWLEDGE)
+-- Cruza únicamente días libres sin exponer horarios laborales ajenos
+create or replace function public.get_group_free_matches(
+  p_group_id uuid,
   p_start_date date default current_date,
-  p_end_date date default (current_date + interval '60 days')::date,
-  p_target_user_ids uuid[] default null
+  p_end_date date default (current_date + interval '60 days')::date
 )
 returns table (
   match_date date,
-  matched_user_id uuid,
-  matched_user_name text,
-  group_id uuid,
-  group_name text
+  total_free_members bigint,
+  free_member_names text[]
 )
 language plpgsql
 security definer
@@ -356,97 +355,52 @@ as $$
 declare
   v_caller_id uuid := auth.uid();
 begin
-  -- 1. Validar autenticación
-  if v_caller_id is null then
-    raise exception 'Acceso no autorizado: Debe haber una sesión activa de usuario.';
-  end if;
-
-  -- 2. Validar pertenencia al grupo si se especifica p_group_id
-  if p_group_id is not null and not public.is_group_member(p_group_id, v_caller_id) then
-    raise exception 'Acceso denegado: No perteneces al grupo especificado.';
+  -- Solo miembros del grupo o el Superadmin pueden consultar coincidencias
+  if not (public.is_superadmin() or public.is_group_member(p_group_id, v_caller_id)) then
+    raise exception 'Acceso denegado: No perteneces a este grupo.';
   end if;
 
   return query
-  with caller_free_days as (
-    -- Días libres del llamador
-    select s.date
-    from public.schedules s
-    where s.user_id = v_caller_id
-      and s.is_free = true
-      and (p_start_date is null or s.date >= p_start_date)
-      and (p_end_date is null or s.date <= p_end_date)
+  with group_users as (
+    select gm.user_id, coalesce(p.nombre, split_part(p.email, '@', 1), 'Compañero') as user_name
+    from public.group_members gm
+    join public.perfiles p on p.user_id = gm.user_id
+    where gm.group_id = p_group_id
   ),
-  eligible_peers as (
-    -- Contactos elegibles: Compañeros de grupos en común
-    select distinct gm_peer.user_id as peer_id, g.id as grp_id, g.name as grp_name
-    from public.group_members gm_caller
-    join public.groups g on g.id = gm_caller.group_id
-    join public.group_members gm_peer on gm_peer.group_id = g.id
-    where gm_caller.user_id = v_caller_id
-      and gm_peer.user_id <> v_caller_id
-      and (p_group_id is null or g.id = p_group_id)
-      and (p_target_user_ids is null or gm_peer.user_id = any(p_target_user_ids))
+  free_days as (
+    -- Días libres procedentes de schedules
+    select s.date, gu.user_name
+    from public.schedules s
+    join group_users gu on gu.user_id = s.user_id
+    where s.is_free = true
+      and s.date >= p_start_date
+      and s.date <= p_end_date
+
+    union
+
+    -- O días libres procedentes de "Turnos" (indiceEstado = 1)
+    select 
+      make_date(split_part(t.mes_anio, '-', 1)::int, split_part(t.mes_anio, '-', 2)::int + 1, t.dia) as date,
+      gu.user_name
+    from public."Turnos" t
+    join group_users gu on (gu.user_id = t.usuario_id or lower(gu.user_name) = lower(t.usuario))
+    where t.indiceEstado = 1
   )
   select 
-    peer_schedules.date as match_date,
-    peers.peer_id as matched_user_id,
-    coalesce(p.nombre, p.email, 'Compañero') as matched_user_name,
-    peers.grp_id as group_id,
-    peers.grp_name as group_name
-  from caller_free_days cfd
-  join public.schedules peer_schedules 
-    on peer_schedules.date = cfd.date
-    and peer_schedules.is_free = true
-  join eligible_peers peers 
-    on peers.peer_id = peer_schedules.user_id
-  left join public.perfiles p 
-    on p.user_id = peers.peer_id
-  order by match_date asc, matched_user_name asc;
-end;
-$$;
-
--- Versión agregada: Devuelve los días con el listado de personas que coinciden
-create or replace function public.get_free_days_summary(
-  p_group_id uuid default null,
-  p_start_date date default current_date,
-  p_end_date date default (current_date + interval '60 days')::date
-)
-returns table (
-  match_date date,
-  total_matches bigint,
-  matched_user_ids uuid[],
-  matched_user_names text[]
-)
-language plpgsql
-security definer
-set search_path = public, auth
-as $$
-begin
-  return query
-  select 
-    m.match_date,
-    count(distinct m.matched_user_id) as total_matches,
-    array_agg(distinct m.matched_user_id) as matched_user_ids,
-    array_agg(distinct m.matched_user_name) as matched_user_names
-  from public.get_free_days_matches(p_group_id, p_start_date, p_end_date) m
-  group by m.match_date
-  order by m.match_date asc;
+    fd.date as match_date,
+    count(distinct fd.user_name) as total_free_members,
+    array_agg(distinct fd.user_name) as free_member_names
+  from free_days fd
+  where fd.date >= p_start_date and fd.date <= p_end_date
+  group by fd.date
+  having count(distinct fd.user_name) >= 2 -- Al menos 2 personas libres para coincidir
+  order by match_date asc;
 end;
 $$;
 
 -- =========================================================================
--- SECCIÓN 4: TABLAS AUXILIARES EXISTENTES (Perfiles, Mensajes, Votaciones, Push)
+-- SECCIÓN 5: TABLAS DE ACTIVIDAD DE GRUPO (Mensajes y Votaciones)
 -- =========================================================================
-
-create table if not exists public.perfiles (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid references auth.users(id) on delete cascade unique,
-  nombre text not null unique,
-  email text,
-  pin text,
-  rol text not null default 'usuario',
-  created_at timestamptz not null default timezone('utc'::text, now())
-);
 
 create table if not exists public.mensajes (
   id bigint generated by default as identity primary key,
@@ -465,52 +419,240 @@ create table if not exists public.votaciones (
   created_at timestamptz not null default timezone('utc'::text, now())
 );
 
-create table if not exists public.suscripciones_push (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid references auth.users(id) on delete cascade,
-  usuario text not null,
-  endpoint text not null unique,
-  p256dh text not null,
-  auth text not null,
-  created_at timestamptz not null default timezone('utc'::text, now())
-);
+-- =========================================================================
+-- SECCIÓN 6: ROW LEVEL SECURITY (RLS) ESTRICTO CON PODER TOTAL PARA CULE
+-- =========================================================================
 
--- RLS en tablas auxiliares
+-- Forzar RLS en todas las tablas sensibles
 alter table public.perfiles enable row level security;
+alter table public.perfiles force row level security;
+
+alter table public.groups enable row level security;
+alter table public.groups force row level security;
+
+alter table public.group_members enable row level security;
+alter table public.group_members force row level security;
+
+alter table public.group_invitations enable row level security;
+alter table public.group_invitations force row level security;
+
+alter table public.schedules enable row level security;
+alter table public.schedules force row level security;
+
+alter table public."Turnos" enable row level security;
+alter table public."Turnos" force row level security;
+
 alter table public.mensajes enable row level security;
+alter table public.mensajes force row level security;
+
 alter table public.votaciones enable row level security;
-alter table public.suscripciones_push enable row level security;
+alter table public.votaciones force row level security;
 
--- Perfiles
-create policy "perfiles_select" on public.perfiles for select using (true);
-create policy "perfiles_update" on public.perfiles for update using (auth.uid() = user_id);
+-- Limpieza de políticas anteriores
+drop policy if exists "perfiles_all" on public.perfiles;
+drop policy if exists "groups_all" on public.groups;
+drop policy if exists "group_members_all" on public.group_members;
+drop policy if exists "turnos_select_strict" on public."Turnos";
+drop policy if exists "turnos_insert_own" on public."Turnos";
+drop policy if exists "turnos_update_own" on public."Turnos";
+drop policy if exists "turnos_delete_own" on public."Turnos";
+drop policy if exists "schedules_select_strict" on public.schedules;
+drop policy if exists "schedules_insert_own_only" on public.schedules;
+drop policy if exists "schedules_update_own_only" on public.schedules;
+drop policy if exists "schedules_delete_own_only" on public.schedules;
 
--- Mensajes vinculados al grupo
-create policy "mensajes_select" on public.mensajes for select using (
-  group_id is null or public.is_group_member(group_id, auth.uid())
-);
-create policy "mensajes_insert" on public.mensajes for insert with check (
-  group_id is null or public.is_group_member(group_id, auth.uid())
-);
+-- -------------------------------------------------------------------------
+-- POLÍTICAS: perfiles
+-- -------------------------------------------------------------------------
+create policy "perfiles_select"
+  on public.perfiles for select to authenticated
+  using (true); -- Los perfiles básicos son legibles para saber nombres y amigos
 
--- Trigger de nuevo usuario
-create or replace function public.handle_new_user()
-returns trigger as $$
-begin
-  insert into public.perfiles (user_id, email, nombre, rol)
-  values (
-    new.id,
-    new.email,
-    coalesce(new.raw_user_meta_data->>'nombre', split_part(new.email, '@', 1)),
-    coalesce(new.raw_user_meta_data->>'rol', 'usuario')
-  )
-  on conflict (user_id) do update set
-    email = excluded.email;
-  return new;
-end;
-$$ language plpgsql security definer;
+create policy "perfiles_update"
+  on public.perfiles for update to authenticated
+  using (public.is_superadmin() or auth.uid() = user_id)
+  with check (public.is_superadmin() or auth.uid() = user_id);
 
-drop trigger if exists on_auth_user_created on auth.users;
-create trigger on_auth_user_created
-  after insert on auth.users
-  for each row execute procedure public.handle_new_user();
+create policy "perfiles_delete"
+  on public.perfiles for delete to authenticated
+  using (public.is_superadmin());
+
+-- -------------------------------------------------------------------------
+-- POLÍTICAS: groups
+-- Cule (Superadmin) lo ve y controla todo. Usuarios normales solo sus grupos.
+-- -------------------------------------------------------------------------
+create policy "groups_select"
+  on public.groups for select to authenticated
+  using (public.is_superadmin() or public.is_group_member(id, auth.uid()));
+
+create policy "groups_insert"
+  on public.groups for insert to authenticated
+  with check (public.is_superadmin() or created_by = auth.uid());
+
+create policy "groups_update"
+  on public.groups for update to authenticated
+  using (public.is_superadmin() or public.is_group_admin(id, auth.uid()))
+  with check (public.is_superadmin() or public.is_group_admin(id, auth.uid()));
+
+create policy "groups_delete"
+  on public.groups for delete to authenticated
+  using (public.is_superadmin() or public.is_group_admin(id, auth.uid()));
+
+-- -------------------------------------------------------------------------
+-- POLÍTICAS: group_members
+-- -------------------------------------------------------------------------
+create policy "group_members_select"
+  on public.group_members for select to authenticated
+  using (public.is_superadmin() or public.is_group_member(group_id, auth.uid()));
+
+create policy "group_members_insert"
+  on public.group_members for insert to authenticated
+  with check (
+    public.is_superadmin()
+    or public.is_group_admin(group_id, auth.uid())
+    or user_id = auth.uid() -- Para unirse mediante código
+  );
+
+create policy "group_members_update"
+  on public.group_members for update to authenticated
+  using (public.is_superadmin() or public.is_group_admin(group_id, auth.uid()))
+  with check (public.is_superadmin() or public.is_group_admin(group_id, auth.uid()));
+
+create policy "group_members_delete"
+  on public.group_members for delete to authenticated
+  using (
+    public.is_superadmin()
+    or public.is_group_admin(group_id, auth.uid())
+    or user_id = auth.uid()
+  );
+
+-- -------------------------------------------------------------------------
+-- POLÍTICAS: group_invitations
+-- -------------------------------------------------------------------------
+create policy "group_invitations_select"
+  on public.group_invitations for select to authenticated
+  using (public.is_superadmin() or public.is_group_admin(group_id, auth.uid()));
+
+create policy "group_invitations_insert"
+  on public.group_invitations for insert to authenticated
+  with check (public.is_superadmin() or public.is_group_admin(group_id, auth.uid()));
+
+create policy "group_invitations_delete"
+  on public.group_invitations for delete to authenticated
+  using (public.is_superadmin() or public.is_group_admin(group_id, auth.uid()));
+
+-- -------------------------------------------------------------------------
+-- POLÍTICAS: schedules (PRIVACIDAD ESTRICTA: SOLO PROPIO O SUPERADMIN)
+-- -------------------------------------------------------------------------
+create policy "schedules_select_strict"
+  on public.schedules for select to authenticated
+  using (public.is_superadmin() or user_id = auth.uid());
+
+create policy "schedules_insert_own_only"
+  on public.schedules for insert to authenticated
+  with check (public.is_superadmin() or user_id = auth.uid());
+
+create policy "schedules_update_own_only"
+  on public.schedules for update to authenticated
+  using (public.is_superadmin() or user_id = auth.uid())
+  with check (public.is_superadmin() or user_id = auth.uid());
+
+create policy "schedules_delete_own_only"
+  on public.schedules for delete to authenticated
+  using (public.is_superadmin() or user_id = auth.uid());
+
+-- -------------------------------------------------------------------------
+-- POLÍTICAS: "Turnos" (TABLA EN USO: SOLO PROPIO O SUPERADMIN)
+-- -------------------------------------------------------------------------
+create policy "turnos_select_strict"
+  on public."Turnos" for select to authenticated
+  using (
+    public.is_superadmin()
+    or usuario_id = auth.uid()
+    or usuario = (select p.nombre from public.perfiles p where p.user_id = auth.uid())
+  );
+
+create policy "turnos_insert_own"
+  on public."Turnos" for insert to authenticated
+  with check (
+    public.is_superadmin()
+    or usuario_id = auth.uid()
+    or usuario = (select p.nombre from public.perfiles p where p.user_id = auth.uid())
+  );
+
+create policy "turnos_update_own"
+  on public."Turnos" for update to authenticated
+  using (
+    public.is_superadmin()
+    or usuario_id = auth.uid()
+    or usuario = (select p.nombre from public.perfiles p where p.user_id = auth.uid())
+  );
+
+create policy "turnos_delete_own"
+  on public."Turnos" for delete to authenticated
+  using (
+    public.is_superadmin()
+    or usuario_id = auth.uid()
+    or usuario = (select p.nombre from public.perfiles p where p.user_id = auth.uid())
+  );
+
+-- -------------------------------------------------------------------------
+-- POLÍTICAS: mensajes (CHAT DEL GRUPO)
+-- -------------------------------------------------------------------------
+create policy "mensajes_select"
+  on public.mensajes for select to authenticated
+  using (
+    public.is_superadmin()
+    or group_id is null
+    or public.is_group_member(group_id, auth.uid())
+  );
+
+create policy "mensajes_insert"
+  on public.mensajes for insert to authenticated
+  with check (
+    public.is_superadmin()
+    or group_id is null
+    or public.is_group_member(group_id, auth.uid())
+  );
+
+create policy "mensajes_delete"
+  on public.mensajes for delete to authenticated
+  using (
+    public.is_superadmin()
+    or (usuario_id is not null and usuario_id = auth.uid())
+    or (group_id is not null and public.is_group_admin(group_id, auth.uid()))
+  );
+
+-- -------------------------------------------------------------------------
+-- POLÍTICAS: votaciones (PLANES DEL GRUPO)
+-- -------------------------------------------------------------------------
+create policy "votaciones_select"
+  on public.votaciones for select to authenticated
+  using (
+    public.is_superadmin()
+    or group_id is null
+    or public.is_group_member(group_id, auth.uid())
+  );
+
+create policy "votaciones_insert"
+  on public.votaciones for insert to authenticated
+  with check (
+    public.is_superadmin()
+    or group_id is null
+    or public.is_group_member(group_id, auth.uid())
+  );
+
+create policy "votaciones_update"
+  on public.votaciones for update to authenticated
+  using (
+    public.is_superadmin()
+    or group_id is null
+    or public.is_group_member(group_id, auth.uid())
+  );
+
+create policy "votaciones_delete"
+  on public.votaciones for delete to authenticated
+  using (
+    public.is_superadmin()
+    or (group_id is not null and public.is_group_admin(group_id, auth.uid()))
+  );

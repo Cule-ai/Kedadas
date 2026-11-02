@@ -1559,20 +1559,50 @@ async function abandonarGrupo(grupoId) {
   alert(`👋 Has salido del grupo "${grupo.nombre}".`);
 }
 
-// Unirse a un grupo mediante código de invitación
+// Unirse a un grupo mediante código de invitación (RPC Supabase o Local)
 async function unirseAGrupoConCodigo() {
   const codigo = (inputCodigoUnirse?.value || '').trim().toUpperCase();
-  if (!codigo) return alert('Por favor, escribe el código de invitación del grupo (ej: AMIGOS-1234).');
+  if (!codigo) return alert('Por favor, escribe el código de invitación del grupo (ej: KED-A7X9 o AMIGOS-1234).');
 
+  if (btnUnirseConCodigo) btnUnirseConCodigo.textContent = '⏳ Uniendo...';
+
+  // 1. Intentar unirse a través de la función RPC segura en Supabase (SECURITY DEFINER)
+  try {
+    const { data: rpcRes, error: rpcErr } = await supabaseApp.rpc('join_group_with_code', { p_code: codigo });
+    if (!rpcErr && rpcRes && rpcRes.success) {
+      if (inputCodigoUnirse) inputCodigoUnirse.value = '';
+      if (btnUnirseConCodigo) btnUnirseConCodigo.textContent = '🔑 Unirme al Grupo';
+
+      // Recargar grupos desde Supabase
+      await cargarGruposDesdeBD();
+      if (rpcRes.group_name) {
+        cambiarGrupo(rpcRes.group_name);
+      }
+
+      if (typeof confetti === 'function') confetti({ particleCount: 60, spread: 80 });
+      alert(`🎉 ${rpcRes.message || '¡Te has unido con éxito!'} Grupo: "${rpcRes.group_name || 'Privado'}".`);
+      return;
+    } else if (rpcErr && rpcErr.message && !rpcErr.message.includes('not found') && !rpcErr.message.includes('function')) {
+      alert(`❌ Error al unirse: ${rpcErr.message}`);
+      if (btnUnirseConCodigo) btnUnirseConCodigo.textContent = '🔑 Unirme al Grupo';
+      return;
+    }
+  } catch (err) {
+    console.warn('RPC join_group_with_code no disponible, usando fallback:', err);
+  }
+
+  // 2. Fallback de retrocompatibilidad con lista de grupos sincronizados
   const grupo = listaGrupos.find(g => (g.codigo_acceso || '').toUpperCase() === codigo || g.id.toUpperCase() === codigo);
   if (!grupo) {
-    return alert(`❌ Código "${codigo}" no encontrado.\nPide al administrador del grupo que te facilite el código exacto.`);
+    if (btnUnirseConCodigo) btnUnirseConCodigo.textContent = '🔑 Unirme al Grupo';
+    return alert(`❌ Código "${codigo}" no encontrado o caducado.\nPide al administrador del grupo que te facilite el código o enlace actualizado.`);
   }
 
   const usuarioActual = usuarioLogueado || 'Cule';
   if (!Array.isArray(grupo.miembros)) grupo.miembros = [];
   if (grupo.miembros.some(m => m.toLowerCase() === usuarioActual.toLowerCase())) {
     cambiarGrupo(grupo.nombre);
+    if (btnUnirseConCodigo) btnUnirseConCodigo.textContent = '🔑 Unirme al Grupo';
     return alert(`Ya perteneces al grupo "${grupo.nombre}". ¡Te hemos llevado a él!`);
   }
 
@@ -1581,6 +1611,7 @@ async function unirseAGrupoConCodigo() {
   await sincronizarGrupoEnSupabase(grupo);
 
   if (inputCodigoUnirse) inputCodigoUnirse.value = '';
+  if (btnUnirseConCodigo) btnUnirseConCodigo.textContent = '🔑 Unirme al Grupo';
   cambiarGrupo(grupo.nombre);
 
   if (typeof confetti === 'function') confetti({ particleCount: 50, spread: 80 });
@@ -1617,6 +1648,15 @@ async function guardarNuevoGrupoDesdePestana() {
   localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos));
   await sincronizarGrupoEnSupabase(nuevoGrupoObj);
 
+  // Intentar registrar invitación oficial en Supabase si la tabla existe
+  try {
+    await supabaseApp.from('groups').insert({
+      name: nombre,
+      icono: icono,
+      created_by: (await supabaseApp.auth.getUser())?.data?.user?.id
+    });
+  } catch (e) {}
+
   if (nuevoGrupoNombreTab) nuevoGrupoNombreTab.value = '';
   if (nuevoGrupoIconoTab) nuevoGrupoIconoTab.value = '';
   btnGuardarNuevoGrupoTab.textContent = 'Crear Grupo';
@@ -1632,7 +1672,7 @@ async function editarGrupoActivo() {
   const grupo = listaGrupos.find(g => g.nombre.toLowerCase() === grupoActivo.toLowerCase());
   if (!grupo) return;
 
-  if (!esAdminDelGrupo(grupo, usuarioLogueado)) {
+  if (!esAdmin && !esAdminDelGrupo(grupo, usuarioLogueado)) {
     return alert(`🔒 Solo el administrador (${grupo.creador}) puede editar los datos de este grupo.`);
   }
 
@@ -1662,7 +1702,7 @@ async function eliminarGrupoActivo() {
   const grupo = listaGrupos.find(g => g.nombre.toLowerCase() === grupoActivo.toLowerCase());
   if (!grupo) return;
 
-  if (!esAdminDelGrupo(grupo, usuarioLogueado)) {
+  if (!esAdmin && !esAdminDelGrupo(grupo, usuarioLogueado)) {
     return alert(`🔒 Solo el administrador (${grupo.creador}) puede eliminar este grupo.`);
   }
 
@@ -1693,14 +1733,30 @@ if (btnCopiarCodigoGrupo) {
   btnCopiarCodigoGrupo.addEventListener('click', async () => {
     const grupo = listaGrupos.find(g => g.nombre.toLowerCase() === grupoActivo.toLowerCase());
     const codigo = grupo ? normalizarGrupo(grupo).codigo_acceso : '';
-    if (!codigo) return;
+    if (!codigo) return alert('No hay código de invitación disponible.');
+
+    const enlaceInvitacion = `${window.location.origin}${window.location.pathname}?unirse=${codigo}`;
+    const textoMensaje = `¡Hola! Únete a mi grupo "${grupo.nombre}" en Kedadas para ver cuándo coincidimos libres:\n${enlaceInvitacion}\n(O introduce el código ${codigo} en la app)`;
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: `Invitación a ${grupo.nombre} en Kedadas`,
+          text: textoMensaje,
+          url: enlaceInvitacion
+        });
+        return;
+      } catch (e) {}
+    }
+
     try {
-      await navigator.clipboard.writeText(codigo);
+      await navigator.clipboard.writeText(enlaceInvitacion);
       const original = btnCopiarCodigoGrupo.textContent;
-      btnCopiarCodigoGrupo.textContent = '✅ ¡Copiado!';
-      setTimeout(() => { btnCopiarCodigoGrupo.textContent = original; }, 2000);
+      btnCopiarCodigoGrupo.textContent = '✅ ¡Enlace Copiado!';
+      setTimeout(() => { btnCopiarCodigoGrupo.textContent = original; }, 2500);
+      alert(`📋 ¡Enlace de invitación copiado al portapapeles!\n\nPégalo en WhatsApp o compártelo:\n${enlaceInvitacion}`);
     } catch (e) {
-      prompt('Copia el código de invitación:', codigo);
+      prompt('Copia este enlace o código de invitación:', enlaceInvitacion);
     }
   });
 }
@@ -1925,48 +1981,18 @@ async function verificarPermisoCalendario(targetUsuario) {
   const usuarioActual = (usuarioLogueado || miUsuario || '').trim().toLowerCase();
   const objetivo = (targetUsuario || '').trim().toLowerCase();
 
-  // Caso 1: Es mi propio calendario -> Autorizado siempre
+  // REGLA 1: Cule es el Superadministrador Global -> Control total para ver y gestionar cualquier cuadrante
+  if (usuarioActual === 'cule' || esAdmin) {
+    return { autorizado: true, esPropio: (objetivo === usuarioActual), esSuperadmin: true };
+  }
+
+  // REGLA 2: Es mi propio calendario -> Autorizado siempre
   if (!objetivo || objetivo === usuarioActual) {
     return { autorizado: true, esPropio: true };
   }
 
-  // Caso 2: Es otra persona -> Comprobar permisos en Supabase
-  try {
-    const { data: { user } } = await supabaseApp.auth.getUser();
-    
-    // Si no hay sesión iniciada en Supabase Auth, denegar acceso a calendarios ajenos
-    if (!user) {
-      return { autorizado: false, esPropio: false, motivo: 'sin_sesion' };
-    }
-
-    // Buscar en perfiles si el objetivo tiene usuario_id
-    const { data: perfilTarget } = await supabaseApp
-      .from('perfiles')
-      .select('user_id')
-      .ilike('nombre', targetUsuario)
-      .maybeSingle();
-
-    if (!perfilTarget || !perfilTarget.user_id) {
-      return { autorizado: false, esPropio: false, motivo: 'perfil_no_encontrado' };
-    }
-
-    // Comprobar en calendar_permissions si el dueño (grantor_id) dio permiso al usuario actual (grantee_id)
-    const { data: permiso } = await supabaseApp
-      .from('calendar_permissions')
-      .select('id')
-      .eq('grantor_id', perfilTarget.user_id)
-      .eq('grantee_id', user.id)
-      .maybeSingle();
-
-    if (permiso && permiso.id) {
-      return { autorizado: true, esPropio: false };
-    }
-  } catch (err) {
-    console.warn('Verificación de permisos calendar_permissions:', err);
-  }
-
-  // Por defecto, privacidad estricta: DENEGADO
-  return { autorizado: false, esPropio: false, motivo: 'no_autorizado' };
+  // REGLA 3: Usuarios estándar -> Privacidad estricta: NADIE puede ver el calendario de otro directamente
+  return { autorizado: false, esPropio: false, motivo: 'privacidad_estricta_estandar' };
 }
 
 async function obtenerTurnosMesNube() {
@@ -4208,10 +4234,30 @@ window.addEventListener('DOMContentLoaded', async () => {
           nombre = email.split('@')[0];
         }
       }
-      concederAcceso(nombre, rol === 'admin');
+      concederAcceso(nombre, rol === 'admin' || rol === 'superadmin' || nombre === 'Cule');
     }
   } catch (e) {
     console.warn('No se encontró sesión activa de Supabase Auth.');
   }
+
+  // Detectar automáticamente si se ha abierto un enlace de invitación (?unirse=KED-XXXX)
+  comprobarParametroInvitacionUrl();
 });
+
+// Comprueba si la URL contiene un código de invitación y solicita unirse al grupo
+function comprobarParametroInvitacionUrl() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const codigo = (params.get('unirse') || params.get('codigo') || params.get('join') || '').trim().toUpperCase();
+    if (codigo) {
+      if (inputCodigoUnirse) inputCodigoUnirse.value = codigo;
+      setTimeout(() => {
+        const confirmar = confirm(`🔑 Has abierto una invitación para unirte con el código: ${codigo}\n\n¿Deseas unirte a este grupo privado ahora?`);
+        if (confirmar) {
+          unirseAGrupoConCodigo();
+        }
+      }, 700);
+    }
+  } catch (e) {}
+}
 
