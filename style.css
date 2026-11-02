@@ -2725,6 +2725,72 @@ body.dark-theme .aviso-privado-admin p { color: #fcd34d; }
   }
 }
 
+/* ==========================================================================
+   ESTADO DE BLOQUEO DE PRIVACIDAD DE CALENDARIO (RLS)
+   ========================================================================== */
+.bloqueo-privacidad-calendario {
+  grid-column: 1 / -1;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 40px 20px;
+  background: linear-gradient(135deg, rgba(248, 250, 252, 0.95), rgba(241, 245, 249, 0.95));
+  border: 2px dashed #cbd5e1;
+  border-radius: 16px;
+  margin: 15px auto;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+}
+
+.bloqueo-privacidad-calendario .icono-candado {
+  font-size: 3rem;
+  margin-bottom: 12px;
+  animation: pulse-lock 2s infinite ease-in-out;
+}
+
+.bloqueo-privacidad-calendario h3 {
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: #1e293b;
+  margin: 0 0 8px 0;
+}
+
+.bloqueo-privacidad-calendario p {
+  font-size: 0.95rem;
+  color: #475569;
+  margin: 0 0 10px 0;
+  max-width: 440px;
+}
+
+.bloqueo-privacidad-calendario .subtexto-privacidad {
+  font-size: 0.8rem;
+  color: #64748b;
+  margin-bottom: 20px;
+  display: block;
+  max-width: 420px;
+}
+
+body.dark-theme .bloqueo-privacidad-calendario {
+  background: linear-gradient(135deg, #1e293b, #0f172a);
+  border-color: #475569;
+}
+body.dark-theme .bloqueo-privacidad-calendario h3 {
+  color: #f8fafc;
+}
+body.dark-theme .bloqueo-privacidad-calendario p {
+  color: #cbd5e1;
+}
+body.dark-theme .bloqueo-privacidad-calendario .subtexto-privacidad {
+  color: #94a3b8;
+}
+
+@keyframes pulse-lock {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+
 
 
 

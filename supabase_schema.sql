@@ -180,52 +180,111 @@ create table if not exists public.schedules (
   constraint unique_user_date unique (user_id, date)
 );
 
--- Tabla de permisos explícitos de visualización
-create table if not exists public.schedule_permissions (
+-- =========================================================================
+-- TABLA DE AUTORIZACIONES EXPLÍCITAS: calendar_permissions
+-- grantor_id = quien da el permiso (dueño del calendario)
+-- grantee_id = quien recibe el permiso (quien puede leerlo)
+-- =========================================================================
+create table if not exists public.calendar_permissions (
   id uuid primary key default gen_random_uuid(),
-  owner_id uuid not null references auth.users(id) on delete cascade,
-  viewer_id uuid not null references auth.users(id) on delete cascade,
-  granted_at timestamptz not null default timezone('utc'::text, now()),
-  constraint unique_owner_viewer unique (owner_id, viewer_id),
-  constraint no_self_permission check (owner_id <> viewer_id)
+  grantor_id uuid not null references auth.users(id) on delete cascade,
+  grantee_id uuid not null references auth.users(id) on delete cascade,
+  created_at timestamptz not null default timezone('utc'::text, now()),
+  constraint unique_grantor_grantee unique (grantor_id, grantee_id),
+  constraint no_self_grant check (grantor_id <> grantee_id)
 );
 
--- Índices para búsqueda ultrarrápida
+create index if not exists idx_calendar_perms_grantor on public.calendar_permissions(grantor_id);
+create index if not exists idx_calendar_perms_grantee on public.calendar_permissions(grantee_id);
 create index if not exists idx_schedules_user_date on public.schedules(user_id, date);
 create index if not exists idx_schedules_free_date on public.schedules(date) where is_free = true;
-create index if not exists idx_schedule_perms_owner on public.schedule_permissions(owner_id);
-create index if not exists idx_schedule_perms_viewer on public.schedule_permissions(viewer_id);
+
+-- Función de seguridad (SECURITY DEFINER) para comprobar acceso sin recursión
+create or replace function public.has_calendar_access(target_user_id uuid, target_username text)
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select (
+    -- Caso A: Es mi propio calendario
+    (auth.uid() is not null and (
+      target_user_id = auth.uid()
+      or exists (select 1 from public.perfiles p where p.user_id = auth.uid() and lower(p.nombre) = lower(target_username))
+    ))
+    -- Caso B: El dueño me ha otorgado permiso en calendar_permissions
+    or exists (
+      select 1 from public.calendar_permissions cp
+      where cp.grantee_id = auth.uid()
+        and (
+          cp.grantor_id = target_user_id
+          or exists (select 1 from public.perfiles p where p.user_id = cp.grantor_id and lower(p.nombre) = lower(target_username))
+        )
+    )
+  );
+$$;
 
 -- =========================================================================
--- RLS PARA HORARIOS Y PERMISOS
+-- ACTIVACIÓN Y FORCE ROW LEVEL SECURITY (RLS)
 -- =========================================================================
+alter table public.calendar_permissions enable row level security;
+alter table public.calendar_permissions force row level security;
+
 alter table public.schedules enable row level security;
-alter table public.schedule_permissions enable row level security;
+alter table public.schedules force row level security;
 
--- POLÍTICAS: schedules
--- 1. SELECT: Cada usuario puede consultar su horario propio O si tiene permiso explícito
-create policy "schedules_select_own_or_permitted"
+-- También asegurar tabla "Turnos" si existe
+alter table if exists public."Turnos" enable row level security;
+alter table if exists public."Turnos" force row level security;
+
+-- ELIMINAR CUALQUIER POLÍTICA ANTERIOR PERMISIVA DE TIPO SELECT
+drop policy if exists "Lectura abierta de cuadrantes" on public."Turnos";
+drop policy if exists "Lectura de turnos" on public."Turnos";
+drop policy if exists "Permitir select a todos" on public."Turnos";
+drop policy if exists "turnos_select_policy" on public."Turnos";
+drop policy if exists "schedules_select_own_or_permitted" on public.schedules;
+drop policy if exists "schedules_select_all" on public.schedules;
+
+-- POLÍTICAS: calendar_permissions
+create policy "calendar_permissions_select"
+  on public.calendar_permissions
+  for select
+  to authenticated
+  using (grantor_id = auth.uid() or grantee_id = auth.uid());
+
+create policy "calendar_permissions_insert"
+  on public.calendar_permissions
+  for insert
+  to authenticated
+  with check (grantor_id = auth.uid());
+
+create policy "calendar_permissions_delete"
+  on public.calendar_permissions
+  for delete
+  to authenticated
+  using (grantor_id = auth.uid() or grantee_id = auth.uid());
+
+-- POLÍTICAS ESTRICTAS: schedules
+create policy "schedules_select_strict"
   on public.schedules
   for select
   to authenticated
   using (
     user_id = auth.uid()
     or exists (
-      select 1
-      from public.schedule_permissions sp
-      where sp.owner_id = public.schedules.user_id
-        and sp.viewer_id = auth.uid()
+      select 1 from public.calendar_permissions cp
+      where cp.grantor_id = schedules.user_id
+        and cp.grantee_id = auth.uid()
     )
   );
 
--- 2. INSERT: Cada usuario solo puede insertar su propio horario
 create policy "schedules_insert_own_only"
   on public.schedules
   for insert
   to authenticated
   with check (user_id = auth.uid());
 
--- 3. UPDATE: Cada usuario solo puede modificar su propio horario
 create policy "schedules_update_own_only"
   on public.schedules
   for update
@@ -233,34 +292,45 @@ create policy "schedules_update_own_only"
   using (user_id = auth.uid())
   with check (user_id = auth.uid());
 
--- 4. DELETE: Cada usuario solo puede borrar su propio horario
 create policy "schedules_delete_own_only"
   on public.schedules
   for delete
   to authenticated
   using (user_id = auth.uid());
 
--- POLÍTICAS: schedule_permissions
--- 1. SELECT: Visible para el otorgante (owner) o el receptor (viewer)
-create policy "schedule_permissions_select"
-  on public.schedule_permissions
+-- POLÍTICAS ESTRICTAS PARA "Turnos" (Utilizada actualmente en la PWA)
+create policy "turnos_select_strict"
+  on public."Turnos"
   for select
   to authenticated
-  using (owner_id = auth.uid() or viewer_id = auth.uid());
+  using (public.has_calendar_access("Turnos".usuario_id, "Turnos".usuario));
 
--- 2. INSERT: Solo el propietario del horario puede conceder permiso a otro
-create policy "schedule_permissions_insert_owner"
-  on public.schedule_permissions
+create policy "turnos_insert_own"
+  on public."Turnos"
   for insert
   to authenticated
-  with check (owner_id = auth.uid());
+  with check (
+    usuario_id = auth.uid()
+    or usuario = (select p.nombre from public.perfiles p where p.user_id = auth.uid())
+  );
 
--- 3. DELETE: El propietario puede revocar el permiso, o el viewer renunciar a él
-create policy "schedule_permissions_delete_owner_or_viewer"
-  on public.schedule_permissions
+create policy "turnos_update_own"
+  on public."Turnos"
+  for update
+  to authenticated
+  using (
+    usuario_id = auth.uid()
+    or usuario = (select p.nombre from public.perfiles p where p.user_id = auth.uid())
+  );
+
+create policy "turnos_delete_own"
+  on public."Turnos"
   for delete
   to authenticated
-  using (owner_id = auth.uid() or viewer_id = auth.uid());
+  using (
+    usuario_id = auth.uid()
+    or usuario = (select p.nombre from public.perfiles p where p.user_id = auth.uid())
+  );
 
 -- =========================================================================
 -- SECCIÓN 3: FUNCIÓN RPC get_free_days_matches (Zero-Knowledge Coincidencias)

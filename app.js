@@ -1920,14 +1920,76 @@ async function guardarTurnoNube(dia, indiceEstado, mesAnioEspecifico = null) {
   }
 }
 
+// Comprobar si el usuario conectado tiene autorización para ver el calendario de `targetUsuario`
+async function verificarPermisoCalendario(targetUsuario) {
+  const usuarioActual = (usuarioLogueado || miUsuario || '').trim().toLowerCase();
+  const objetivo = (targetUsuario || '').trim().toLowerCase();
+
+  // Caso 1: Es mi propio calendario -> Autorizado siempre
+  if (!objetivo || objetivo === usuarioActual) {
+    return { autorizado: true, esPropio: true };
+  }
+
+  // Caso 2: Es otra persona -> Comprobar permisos en Supabase
+  try {
+    const { data: { user } } = await supabaseApp.auth.getUser();
+    
+    // Si no hay sesión iniciada en Supabase Auth, denegar acceso a calendarios ajenos
+    if (!user) {
+      return { autorizado: false, esPropio: false, motivo: 'sin_sesion' };
+    }
+
+    // Buscar en perfiles si el objetivo tiene usuario_id
+    const { data: perfilTarget } = await supabaseApp
+      .from('perfiles')
+      .select('user_id')
+      .ilike('nombre', targetUsuario)
+      .maybeSingle();
+
+    if (!perfilTarget || !perfilTarget.user_id) {
+      return { autorizado: false, esPropio: false, motivo: 'perfil_no_encontrado' };
+    }
+
+    // Comprobar en calendar_permissions si el dueño (grantor_id) dio permiso al usuario actual (grantee_id)
+    const { data: permiso } = await supabaseApp
+      .from('calendar_permissions')
+      .select('id')
+      .eq('grantor_id', perfilTarget.user_id)
+      .eq('grantee_id', user.id)
+      .maybeSingle();
+
+    if (permiso && permiso.id) {
+      return { autorizado: true, esPropio: false };
+    }
+  } catch (err) {
+    console.warn('Verificación de permisos calendar_permissions:', err);
+  }
+
+  // Por defecto, privacidad estricta: DENEGADO
+  return { autorizado: false, esPropio: false, motivo: 'no_autorizado' };
+}
+
 async function obtenerTurnosMesNube() {
   const mesAnio = `${fechaNavegacion.getFullYear()}-${fechaNavegacion.getMonth()}`;
+  const esPropio = (miUsuario.toLowerCase() === (usuarioLogueado || '').toLowerCase());
   const keyLocal = `kedadas_turnos_${grupoActivo}_${miUsuario}_${mesAnio}`;
+  
+  // 1. REGLA ESTRICTA DE PRIVACIDAD: Si estamos consultando a otra persona, verificar permiso
+  if (!esPropio) {
+    const perm = await verificarPermisoCalendario(miUsuario);
+    if (!perm.autorizado) {
+      // Si NO está autorizado, nunca devolver datos de localStorage y retornar estado no autorizado
+      return { autorizado: false, turnos: [] };
+    }
+  }
+
   let turnosLocales = [];
-  try {
-    const raw = localStorage.getItem(keyLocal);
-    if (raw) turnosLocales = JSON.parse(raw);
-  } catch(e) {}
+  if (esPropio) {
+    try {
+      const raw = localStorage.getItem(keyLocal);
+      if (raw) turnosLocales = JSON.parse(raw);
+    } catch(e) {}
+  }
 
   try {
     let res = await supabaseApp.from('Turnos')
@@ -1943,25 +2005,50 @@ async function obtenerTurnosMesNube() {
         .eq('mes_anio', mesAnio);
     }
 
-    if (!res.error && res.data && res.data.length > 0) {
-      localStorage.setItem(keyLocal, JSON.stringify(res.data));
-      return res.data;
+    if (!res.error && res.data) {
+      // Si RLS devolvió un array vacío para otra persona, significa que no hay datos accesibles
+      if (!esPropio && res.data.length === 0) {
+        const perm = await verificarPermisoCalendario(miUsuario);
+        if (!perm.autorizado) {
+          return { autorizado: false, turnos: [] };
+        }
+      }
+
+      if (esPropio && res.data.length > 0) {
+        localStorage.setItem(keyLocal, JSON.stringify(res.data));
+      }
+      return { autorizado: true, turnos: res.data };
     }
   } catch (e) {
     console.warn('Aviso obteniendo turnos de Supabase:', e);
   }
 
-  return turnosLocales;
+  if (esPropio) {
+    return { autorizado: true, turnos: turnosLocales };
+  } else {
+    return { autorizado: false, turnos: [] };
+  }
 }
 
 async function obtenerTurnosAnoNube() {
   const anioPrefix = `${fechaNavegacion.getFullYear()}-`;
+  const esPropio = (miUsuario.toLowerCase() === (usuarioLogueado || '').toLowerCase());
   const keyLocal = `kedadas_turnos_ano_${grupoActivo}_${miUsuario}_${fechaNavegacion.getFullYear()}`;
+
+  if (!esPropio) {
+    const perm = await verificarPermisoCalendario(miUsuario);
+    if (!perm.autorizado) {
+      return { autorizado: false, turnos: [] };
+    }
+  }
+
   let turnosLocales = [];
-  try {
-    const raw = localStorage.getItem(keyLocal);
-    if (raw) turnosLocales = JSON.parse(raw);
-  } catch(e) {}
+  if (esPropio) {
+    try {
+      const raw = localStorage.getItem(keyLocal);
+      if (raw) turnosLocales = JSON.parse(raw);
+    } catch(e) {}
+  }
 
   try {
     let res = await supabaseApp.from('Turnos')
@@ -1977,15 +2064,28 @@ async function obtenerTurnosAnoNube() {
         .like('mes_anio', `${anioPrefix}%`);
     }
 
-    if (!res.error && res.data && res.data.length > 0) {
-      localStorage.setItem(keyLocal, JSON.stringify(res.data));
-      return res.data;
+    if (!res.error && res.data) {
+      if (!esPropio && res.data.length === 0) {
+        const perm = await verificarPermisoCalendario(miUsuario);
+        if (!perm.autorizado) {
+          return { autorizado: false, turnos: [] };
+        }
+      }
+
+      if (esPropio && res.data.length > 0) {
+        localStorage.setItem(keyLocal, JSON.stringify(res.data));
+      }
+      return { autorizado: true, turnos: res.data };
     }
   } catch (e) {
     console.warn('Aviso obteniendo turnos anuales de Supabase:', e);
   }
 
-  return turnosLocales;
+  if (esPropio) {
+    return { autorizado: true, turnos: turnosLocales };
+  } else {
+    return { autorizado: false, turnos: [] };
+  }
 }
 
 // --- 6. GESTIÓN DE GUARDADO CON CONFIRMACIÓN Y RENDERIZADO CALENDARIOS ---
@@ -2078,7 +2178,32 @@ async function renderizarMes() {
   let diaEmpieza = new Date(anio, mes, 1).getDay();
   diaEmpieza = diaEmpieza === 0 ? 6 : diaEmpieza - 1;
 
-  const datosGuardados = await obtenerTurnosMesNube();
+  const resTurnos = await obtenerTurnosMesNube();
+
+  // Si no está autorizado (ej. Lucía intentando ver el calendario de Cule sin permiso):
+  if (!resTurnos.autorizado) {
+    calendarGrid.innerHTML = `
+      <div class="bloqueo-privacidad-calendario">
+        <div class="icono-candado">🔒</div>
+        <h3>Calendario Privado</h3>
+        <p>No tienes autorización para ver el calendario de <strong>${miUsuario}</strong>.</p>
+        <span class="subtexto-privacidad">Por políticas de seguridad y privacidad (RLS), ${miUsuario} debe otorgarte permiso explícito para que puedas ver sus turnos de trabajo.</span>
+        <button type="button" id="btn-volver-mi-cal" style="padding: 10px 18px; border-radius: 12px; cursor: pointer; font-weight: 700; background: linear-gradient(135deg, #4f46e5, #6366f1); color: #fff; border: none; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);">👤 Volver a mi calendario (${usuarioLogueado || 'Mi usuario'})</button>
+      </div>
+    `;
+    const btnVolver = document.getElementById('btn-volver-mi-cal');
+    if (btnVolver) {
+      btnVolver.addEventListener('click', () => {
+        miUsuario = usuarioLogueado || 'Cule';
+        if (selectorUsuario) selectorUsuario.value = miUsuario;
+        iniciarCalendario();
+      });
+    }
+    actualizarBarraCambiosPendientes();
+    return;
+  }
+
+  const datosGuardados = resTurnos.turnos || [];
   const historial = {};
   datosGuardados.forEach(dato => historial[dato.dia] = dato.indiceEstado);
 
@@ -2123,7 +2248,29 @@ async function renderizarAno() {
   const anio = fechaNavegacion.getFullYear();
   tituloMes.textContent = `Año ${anio}`;
 
-  const datosGuardados = await obtenerTurnosAnoNube();
+  const resTurnos = await obtenerTurnosAnoNube();
+  if (!resTurnos.autorizado) {
+    vistaAnualContainer.innerHTML = `
+      <div class="bloqueo-privacidad-calendario" style="margin: 30px auto; max-width: 500px;">
+        <div class="icono-candado">🔒</div>
+        <h3>Calendario Anual Privado</h3>
+        <p>No tienes autorización para ver el calendario anual de <strong>${miUsuario}</strong>.</p>
+        <span class="subtexto-privacidad">Por políticas de seguridad (RLS), necesitas permiso explícito de ${miUsuario} para consultar su cuadrante.</span>
+        <button type="button" id="btn-volver-mi-cal-ano" style="padding: 10px 18px; border-radius: 12px; cursor: pointer; font-weight: 700; background: linear-gradient(135deg, #4f46e5, #6366f1); color: #fff; border: none; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);">👤 Volver a mi calendario</button>
+      </div>
+    `;
+    const btnVolver = document.getElementById('btn-volver-mi-cal-ano');
+    if (btnVolver) {
+      btnVolver.addEventListener('click', () => {
+        miUsuario = usuarioLogueado || 'Cule';
+        if (selectorUsuario) selectorUsuario.value = miUsuario;
+        iniciarCalendario();
+      });
+    }
+    return;
+  }
+
+  const datosGuardados = resTurnos.turnos || [];
   const historialAno = {};
   for(let i=0; i<12; i++) historialAno[i] = {};
   
