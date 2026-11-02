@@ -145,6 +145,10 @@
 
         <div class="cuadrante-actions-bar">
           <div class="user-select-group">
+            <label for="cuadrante-selector-grupo">Grupo:</label>
+            <select id="cuadrante-selector-grupo" class="selector-grupo-dropdown" title="Cambiar grupo"></select>
+          </div>
+          <div class="user-select-group">
             <label for="usuario-activo">Viendo a:</label>
             <select id="usuario-activo" title="Elige de quién ver los turnos en el calendario"></select>
           </div>
@@ -193,7 +197,7 @@
         <div class="coincidencias-seccion">
           <div class="coincidencias-filtro-container">
             <div class="filtro-header">
-              <span class="filtro-titulo">👥 ¿Con quién quieres coincidir?</span>
+              <span class="filtro-titulo" id="coincidencias-filtro-titulo">👥 ¿Con quién quieres coincidir en <strong>Amigos</strong>?</span>
               <div class="filtro-botones">
                 <button type="button" id="btn-sel-todos" class="btn-link-sm">Todos</button>
                 <span class="sep">|</span>

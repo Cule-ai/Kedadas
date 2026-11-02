@@ -498,6 +498,28 @@ function renderizarSelectoresUsuarios() {
     }
   }
 
+  // Selector de Grupo en la barra superior del Cuadrante (Cambio directo de grupo)
+  const cuadranteSelectorGrupo = document.getElementById('cuadrante-selector-grupo');
+  if (cuadranteSelectorGrupo) {
+    const visibles = (typeof obtenerGruposVisibles === 'function') ? obtenerGruposVisibles(usuarioLogueado) : listaGrupos;
+    cuadranteSelectorGrupo.innerHTML = '';
+    visibles.forEach(g => {
+      const opt = document.createElement('option');
+      const nombreG = g.nombre || g.name;
+      opt.value = nombreG;
+      opt.textContent = `${g.icono || '👥'} ${nombreG}`;
+      if (nombreG.toLowerCase() === grupoActivo.toLowerCase()) opt.selected = true;
+      cuadranteSelectorGrupo.appendChild(opt);
+    });
+
+    if (!cuadranteSelectorGrupo.dataset.listenerAttached) {
+      cuadranteSelectorGrupo.dataset.listenerAttached = 'true';
+      cuadranteSelectorGrupo.addEventListener('change', (e) => {
+        cambiarGrupo(e.target.value);
+      });
+    }
+  }
+
   // Selector en el panel desplegable de edición
   if (selectPersonaAEditar) {
     const valActual = selectPersonaAEditar.value;
@@ -511,7 +533,6 @@ function renderizarSelectoresUsuarios() {
     if (usuarios.includes(valActual)) selectPersonaAEditar.value = valActual;
     else if (usuarios.length > 0) selectPersonaAEditar.value = usuarios[0];
   }
-
 }
 
 // Crear un nuevo usuario en la lista de personas
@@ -838,17 +859,35 @@ function inicializarSelectorLugarQuedada() {
   });
 }
 
-function renderizarFiltroCoincidencias() {
+let ultimoGrupoFiltroCoincidencias = null;
+
+function renderizarFiltroCoincidencias(forzarTodos = false) {
   if (!listaFiltroCoincidencias) return;
   listaFiltroCoincidencias.innerHTML = '';
   
   const miembrosGrupo = (typeof obtenerMiembrosGrupo === 'function') ? obtenerMiembrosGrupo(grupoActivo) : usuarios;
 
-  usuariosSeleccionadosCoincidencias = new Set(
-    [...usuariosSeleccionadosCoincidencias].filter(u => miembrosGrupo.includes(u))
-  );
-  if (usuariosSeleccionadosCoincidencias.size === 0) {
-    miembrosGrupo.forEach(u => usuariosSeleccionadosCoincidencias.add(u));
+  // Actualizar título del filtro indicando claramente el grupo activo
+  const tituloFiltro = document.getElementById('coincidencias-filtro-titulo');
+  if (tituloFiltro) {
+    const grupoObj = listaGrupos.find(g => (g.nombre || g.name || '').toLowerCase() === grupoActivo.toLowerCase());
+    const icono = grupoObj?.icono || '👥';
+    tituloFiltro.innerHTML = `${icono} ¿Con quién quieres coincidir en <strong>${escapeHtml(grupoActivo)}</strong>?`;
+  }
+
+  // Si ha cambiado de grupo o se solicita forzar todos, seleccionar a TODOS los miembros del nuevo grupo
+  const haCambiadoGrupo = !ultimoGrupoFiltroCoincidencias || ultimoGrupoFiltroCoincidencias.toLowerCase() !== grupoActivo.toLowerCase();
+  if (forzarTodos || haCambiadoGrupo) {
+    usuariosSeleccionadosCoincidencias = new Set(miembrosGrupo);
+    ultimoGrupoFiltroCoincidencias = grupoActivo;
+  } else {
+    // Si sigue en el mismo grupo, mantener la selección actual asegurando que pertenezcan al grupo activo
+    usuariosSeleccionadosCoincidencias = new Set(
+      [...usuariosSeleccionadosCoincidencias].filter(u => miembrosGrupo.includes(u))
+    );
+    if (usuariosSeleccionadosCoincidencias.size === 0 && miembrosGrupo.length > 0) {
+      miembrosGrupo.forEach(u => usuariosSeleccionadosCoincidencias.add(u));
+    }
   }
 
   miembrosGrupo.forEach(u => {
@@ -1078,9 +1117,11 @@ const btnGuardarCambiosHorario = document.getElementById('btn-guardar-cambios-ho
 const btnGuardarHorarioTop = document.getElementById('btn-guardar-horario-top');
 
 function normalizarGrupo(g) {
+  if (!g) return null;
+  const nombre = (g.nombre || g.name || 'Grupo').trim();
   let miembros = [];
   if (Array.isArray(g.miembros)) {
-    miembros = g.miembros;
+    miembros = [...g.miembros];
   } else if (typeof g.miembros === 'string') {
     try {
       miembros = JSON.parse(g.miembros);
@@ -1089,20 +1130,23 @@ function normalizarGrupo(g) {
     }
   }
   if (!Array.isArray(miembros) || miembros.length === 0) {
-    const def = GRUPOS_DEFECTO.find(d => d.id === g.id || d.nombre.toLowerCase() === (g.nombre || '').toLowerCase());
-    if (def) miembros = [...def.miembros];
-    else miembros = [g.creador || usuarioLogueado || 'Cule'];
+    const def = GRUPOS_DEFECTO.find(d => (d.id || '').toLowerCase() === (g.id || '').toLowerCase() || d.nombre.toLowerCase() === nombre.toLowerCase());
+    if (def && Array.isArray(def.miembros) && def.miembros.length > 0) {
+      miembros = [...def.miembros];
+    } else {
+      miembros = [g.creador || usuarioLogueado || 'Cule'];
+    }
   }
-  const creador = g.creador || (['Amigos', 'Familia', 'Pareja', 'Hijos'].includes(g.nombre) ? 'Cule' : (usuarioLogueado || 'Cule'));
-  const codigo = g.codigo_acceso || generarCodigoAcceso(g.nombre);
+  const creador = g.creador || (['Amigos', 'Familia', 'Pareja', 'Hijos'].includes(nombre) ? 'Cule' : (usuarioLogueado || 'Cule'));
+  const codigo = g.codigo_acceso || generarCodigoAcceso(nombre);
   return {
-    id: g.id || g.nombre.toLowerCase().replace(/\s+/g, '-'),
-    nombre: g.nombre,
+    id: g.id || nombre.toLowerCase().replace(/\s+/g, '-'),
+    nombre: nombre,
     icono: g.icono || '👥',
     creador: creador,
     miembros: miembros,
     codigo_acceso: codigo,
-    descripcion: g.descripcion || ''
+    descripcion: g.descripcion || g.description || ''
   };
 }
 
@@ -1116,6 +1160,7 @@ function puedeUsuarioVerGrupo(g, usuario) {
   if (!usuario) return true;
   if (esAdmin || usuario.toLowerCase() === 'cule') return true;
   const gNorm = normalizarGrupo(g);
+  if (!gNorm) return false;
   if (gNorm.creador && gNorm.creador.toLowerCase() === usuario.toLowerCase()) return true;
   if (Array.isArray(gNorm.miembros) && gNorm.miembros.some(m => m.toLowerCase() === usuario.toLowerCase())) return true;
   return false;
@@ -1129,20 +1174,34 @@ function esAdminDelGrupo(g, usuario) {
   if (!g) return false;
   if (esAdmin || (usuario && usuario.toLowerCase() === 'cule')) return true;
   const gNorm = normalizarGrupo(g);
+  if (!gNorm) return false;
   if (gNorm.creador && usuario && gNorm.creador.toLowerCase() === usuario.toLowerCase()) return true;
   return false;
 }
 
 function obtenerMiembrosGrupo(grupoNombre) {
-  const g = listaGrupos.find(item => item.nombre.toLowerCase() === (grupoNombre || grupoActivo).toLowerCase());
-  if (!g) return ['Cule', 'Persona 2', 'Persona 3', 'Persona 4'];
-  const norm = normalizarGrupo(g);
-  return norm.miembros;
+  const nombreTarget = (grupoNombre || grupoActivo || '').trim().toLowerCase();
+  const g = listaGrupos.find(item => {
+    const n = (item.nombre || item.name || '').trim().toLowerCase();
+    return n === nombreTarget;
+  });
+  if (g) {
+    const norm = normalizarGrupo(g);
+    if (norm && Array.isArray(norm.miembros) && norm.miembros.length > 0) {
+      return norm.miembros;
+    }
+  }
+  const def = GRUPOS_DEFECTO.find(d => d.nombre.toLowerCase() === nombreTarget || (d.id || '').toLowerCase() === nombreTarget);
+  if (def && Array.isArray(def.miembros) && def.miembros.length > 0) {
+    return [...def.miembros];
+  }
+  return (Array.isArray(usuarios) && usuarios.length > 0) ? [...usuarios] : ['Cule'];
 }
 
 function actualizarBannerGrupo() {
-  const grupoObj = listaGrupos.find(g => g.nombre.toLowerCase() === grupoActivo.toLowerCase());
-  const texto = `${grupoObj?.icono || '👥'} ${grupoActivo}`;
+  const grupoObj = listaGrupos.find(g => (g.nombre || g.name || '').toLowerCase() === grupoActivo.toLowerCase());
+  const icono = grupoObj?.icono || '👥';
+  const texto = `${icono} ${grupoActivo}`;
   if (nombreGrupoBanner) nombreGrupoBanner.textContent = texto;
   const nombreGrupoBannerTab = document.getElementById('nombre-grupo-banner-tab');
   if (nombreGrupoBannerTab) nombreGrupoBannerTab.textContent = texto;
@@ -1168,24 +1227,82 @@ async function sincronizarGrupoEnSupabase(grupo) {
 }
 
 async function cargarGruposDesdeBD() {
+  let gruposCargados = false;
+
+  // 1. Intentar cargar desde tabla 'groups' y 'group_members' (schema Supabase Auth)
   try {
-    const { data, error } = await supabaseApp.from('grupos').select('*').order('created_at', { ascending: true });
-    if (!error && data && data.length > 0) {
-      listaGrupos = data.map(g => normalizarGrupo(g));
-    } else {
-      const guardados = JSON.parse(localStorage.getItem('kedadas_lista_grupos'));
-      if (Array.isArray(guardados) && guardados.length > 0) {
-        listaGrupos = guardados.map(g => normalizarGrupo(g));
-      } else {
-        listaGrupos = [...GRUPOS_DEFECTO];
+    const { data: groupsData, error: groupsErr } = await supabaseApp
+      .from('groups')
+      .select('*')
+      .order('created_at', { ascending: true });
+
+    if (!groupsErr && Array.isArray(groupsData) && groupsData.length > 0) {
+      const { data: membersData } = await supabaseApp
+        .from('group_members')
+        .select('group_id, user_id, role');
+
+      const { data: perfilesData } = await supabaseApp
+        .from('perfiles')
+        .select('user_id, nombre');
+
+      const userMap = new Map();
+      if (Array.isArray(perfilesData)) {
+        perfilesData.forEach(p => {
+          if (p.user_id && p.nombre) userMap.set(p.user_id, p.nombre);
+        });
       }
+
+      const miembrosPorGrupo = new Map();
+      if (Array.isArray(membersData)) {
+        membersData.forEach(m => {
+          const nombreUser = userMap.get(m.user_id);
+          if (nombreUser) {
+            if (!miembrosPorGrupo.has(m.group_id)) miembrosPorGrupo.set(m.group_id, []);
+            miembrosPorGrupo.get(m.group_id).push(nombreUser);
+          }
+        });
+      }
+
+      listaGrupos = groupsData.map(g => {
+        let miembrosG = miembrosPorGrupo.get(g.id) || [];
+        const creadorNombre = userMap.get(g.created_by) || (usuarioLogueado || 'Cule');
+        if (miembrosG.length === 0) miembrosG = [creadorNombre];
+        else if (!miembrosG.includes(creadorNombre)) miembrosG.unshift(creadorNombre);
+
+        return normalizarGrupo({
+          id: g.id,
+          nombre: g.name || g.nombre,
+          icono: g.icono || '👥',
+          creador: creadorNombre,
+          miembros: miembrosG,
+          codigo_acceso: g.codigo_acceso || generarCodigoAcceso(g.name || g.nombre),
+          descripcion: g.description || ''
+        });
+      });
+      gruposCargados = true;
     }
-  } catch (e) {
+  } catch (errGroups) {
+    console.warn('Aviso cargando groups desde Supabase:', errGroups);
+  }
+
+  // 2. Si no se cargaron desde 'groups', intentar desde 'grupos' (retrocompatibilidad)
+  if (!gruposCargados) {
+    try {
+      const { data, error } = await supabaseApp.from('grupos').select('*').order('created_at', { ascending: true });
+      if (!error && Array.isArray(data) && data.length > 0) {
+        listaGrupos = data.map(g => normalizarGrupo(g));
+        gruposCargados = true;
+      }
+    } catch (e) {}
+  }
+
+  // 3. Fallback a almacenamiento local o valores por defecto
+  if (!gruposCargados) {
     const guardados = JSON.parse(localStorage.getItem('kedadas_lista_grupos'));
     if (Array.isArray(guardados) && guardados.length > 0) {
       listaGrupos = guardados.map(g => normalizarGrupo(g));
     } else {
-      listaGrupos = [...GRUPOS_DEFECTO];
+      listaGrupos = [...GRUPOS_DEFECTO].map(g => normalizarGrupo(g));
     }
   }
 
@@ -1193,6 +1310,8 @@ async function cargarGruposDesdeBD() {
   renderizarSelectorGrupos();
   renderizarPanelGestionGrupoActivo();
   actualizarBannerGrupo();
+  renderizarSelectoresUsuarios();
+  renderizarFiltroCoincidencias(true);
 }
 
 function renderizarSelectorGrupos() {
@@ -1378,13 +1497,15 @@ function renderizarPanelGestionGrupoActivo() {
 }
 
 function cambiarGrupo(nuevoGrupo) {
-  const g = listaGrupos.find(item => item.nombre.toLowerCase() === nuevoGrupo.toLowerCase());
+  if (!nuevoGrupo) return;
+  const nombreLimpio = nuevoGrupo.trim();
+  const g = listaGrupos.find(item => (item.nombre || item.name || '').toLowerCase() === nombreLimpio.toLowerCase());
   if (g && !puedeUsuarioVerGrupo(g, usuarioLogueado)) {
-    return alert(`🔒 Grupo Privado: No tienes acceso al grupo "${nuevoGrupo}". Pide al administrador (${g.creador || 'el creador'}) que te añada o introduce su código de invitación.`);
+    return alert(`🔒 Grupo Privado: No tienes acceso al grupo "${nombreLimpio}". Pide al administrador (${g.creador || 'el creador'}) que te añada o introduce su código de invitación.`);
   }
 
   if (Object.keys(cambiosHorarioPendientes).length > 0) {
-    const guardar = confirm(`Tienes modificaciones sin guardar en el cuadrante de "${grupoActivo}". ¿Deseas guardarlas antes de cambiar a "${nuevoGrupo}"?`);
+    const guardar = confirm(`Tienes modificaciones sin guardar en el cuadrante de "${grupoActivo}". ¿Deseas guardarlas antes de cambiar a "${nombreLimpio}"?`);
     if (guardar) {
       guardarCambiosHorarioConfirmado();
     } else {
@@ -1393,7 +1514,7 @@ function cambiarGrupo(nuevoGrupo) {
     }
   }
 
-  grupoActivo = nuevoGrupo;
+  grupoActivo = g ? (g.nombre || g.name) : nombreLimpio;
   localStorage.setItem('kedadas_grupo_activo', grupoActivo);
 
   // Asegurar que miUsuario pertenece a los miembros del nuevo grupo
@@ -1406,11 +1527,15 @@ function cambiarGrupo(nuevoGrupo) {
     }
   }
 
+  // IMPORTANTE: Forzar reinicialización de los miembros seleccionados para coincidencia
+  usuariosSeleccionadosCoincidencias = new Set(miembrosNuevo);
+  ultimoGrupoFiltroCoincidencias = grupoActivo;
+
   renderizarSelectorGrupos();
   renderizarPanelGestionGrupoActivo();
   actualizarBannerGrupo();
   renderizarSelectoresUsuarios();
-  renderizarFiltroCoincidencias();
+  renderizarFiltroCoincidencias(true);
 
   if (resultadoCoincidencias) {
     resultadoCoincidencias.innerHTML = '';
@@ -4436,6 +4561,8 @@ function inicializarNavegacionPestanas() {
     } else if (tabName === 'usuarios') {
       poblarEditorPersonaDesplegable();
     } else if (tabName === 'cuadrante') {
+      renderizarSelectoresUsuarios();
+      renderizarFiltroCoincidencias();
       iniciarCalendario();
     }
   }
