@@ -33,37 +33,32 @@
 
   <div id="pantalla-login" class="login-container">
     <h2>Kedadas</h2>
-    <p>Cuadrante de Turnos</p>
+    <p>Cuadrante de Turnos & Quedadas</p>
 
-    <div class="login-tabs">
-      <button type="button" id="tab-auth-pin" class="login-tab activo">🔢 PIN Rápido</button>
-      <button type="button" id="tab-auth-email" class="login-tab">🔐 Cuenta & Clave</button>
-    </div>
-
-    <!-- Formulario Supabase Auth (Email / Contraseña) -->
-    <div id="form-auth-email" class="login-form-seccion" style="display: none;">
-      <input type="text" id="login-nombre-reg" placeholder="Tu Nombre (si te registras)" style="display: none;">
-      <input type="email" id="login-email" placeholder="Correo electrónico" autocomplete="email">
-      <input type="password" id="login-password" placeholder="Contraseña" autocomplete="current-password">
-      <div class="auth-buttons-row">
-        <button id="btn-login-email" class="btn-login">Iniciar Sesión</button>
-        <button id="btn-register-email" class="btn-register">Registrarse</button>
+    <!-- Formulario Supabase Auth Oficial (Email / Contraseña) -->
+    <div id="form-auth-email" class="login-form-seccion" style="display: block;">
+      <div class="login-tabs" id="auth-modo-tabs">
+        <button type="button" id="tab-auth-login" class="login-tab activo">🔐 Iniciar Sesión</button>
+        <button type="button" id="tab-auth-registro" class="login-tab">✨ Nueva Cuenta</button>
       </div>
+
+      <div id="wrap-nombre-registro" style="display: none; margin-bottom: 10px;">
+        <input type="text" id="login-nombre-reg" placeholder="Tu Nombre para el cuadrante (ej: Laura)" maxlength="30">
+      </div>
+
+      <input type="email" id="login-email" placeholder="Correo electrónico" autocomplete="email" required>
+      <input type="password" id="login-password" placeholder="Contraseña (mínimo 6 caracteres)" autocomplete="current-password" required>
+
+      <div class="auth-buttons-row">
+        <button id="btn-login-email" class="btn-login" style="width: 100%;">Iniciar Sesión</button>
+        <button id="btn-register-email" class="btn-register" style="display: none; width: 100%;">Crear Cuenta</button>
+      </div>
+
       <a href="#" id="link-recuperar-pass" class="link-recuperar">¿Olvidaste tu contraseña?</a>
     </div>
 
-    <!-- Formulario PIN clásico -->
-    <div id="form-auth-pin" class="login-form-seccion" style="display: block;">
-      <select id="login-usuario">
-        <option value="">Cargando personas...</option>
-      </select>
-      <input type="password" id="login-pin" placeholder="PIN de 4 dígitos" inputmode="numeric" maxlength="4">
-      <button id="btn-login-pin" class="btn-login">Entrar con PIN</button>
-      <a href="#" id="link-crear-mi-pin" class="link-recuperar" style="display: block; margin-top: 8px;">🔑 ¿Crear o cambiar tu PIN?</a>
-    </div>
-
     <div class="divisor-login"><span>o bien</span></div>
-    <button id="btn-login-faceid" class="btn-faceid">😎 Entrar con Face ID / Touch ID</button>
+    <button id="btn-login-faceid" class="btn-faceid">🔑 Entrar con Passkey / Biometría</button>
   </div>
 
   <div id="pantalla-app" class="calendar-container app-tabbed-layout" style="display: none;">
@@ -482,40 +477,15 @@
         </div>
       </div>
 
-      <!-- Gestión de PINs de personas -->
+      <!-- Gestión de Miembros y Cuentas -->
       <div class="card-gestion-personas">
         <div class="desplegable-header">
-          <span class="desplegable-titulo">🔑 Claves PIN de las personas</span>
-          <button type="button" id="btn-abrir-modal-completo-usuarios" class="btn-link-sm">Ver tarjetas / Administrar</button>
+          <span class="desplegable-titulo">👥 Miembros y Cuentas</span>
+          <button type="button" id="btn-abrir-modal-completo-usuarios" class="btn-link-sm">Ver miembros</button>
         </div>
-
-        <div class="editor-persona-desplegable-wrap">
-          <label for="select-persona-a-editar">Selecciona persona para consultar o cambiar su PIN:</label>
-          <div class="fila-edicion-persona">
-            <select id="select-persona-a-editar" class="select-persona-dropdown"></select>
-            <div class="pin-edit-box">
-              <span class="pin-label-mini">PIN:</span>
-              <input type="password" id="input-pin-editar-desplegable" maxlength="4" inputmode="numeric" placeholder="4 núm">
-              <button type="button" id="btn-toggle-eye-desplegable" class="btn-mini-icon" title="Mostrar/ocultar PIN">👁️</button>
-              <button type="button" id="btn-guardar-pin-desplegable" class="btn-guardar-pin-mini" title="Guardar PIN">💾 Guardar PIN</button>
-              <button type="button" id="btn-borrar-persona-desplegable" class="btn-borrar-user-mini" title="Eliminar persona seleccionada">🗑️</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Añadir nueva persona -->
-        <div class="desplegable-nuevo-usuario-row" style="margin-top: 15px;">
-          <span class="nuevo-user-badge-mini">➕ Añadir nueva persona al cuadrante:</span>
-          <div class="nuevo-user-inputs">
-            <input type="text" id="nuevo-nombre-desplegable" placeholder="Nombre (ej. Laura)" maxlength="20">
-            <input type="password" id="nuevo-pin-desplegable" placeholder="PIN (4 núm)" maxlength="4" inputmode="numeric">
-            <select id="nuevo-rol-desplegable">
-              <option value="usuario">Usuario</option>
-              <option value="admin">Admin</option>
-            </select>
-            <button type="button" id="btn-crear-usuario-desplegable" class="btn-sec-primario-sm">➕ Añadir</button>
-          </div>
-        </div>
+        <p class="sub-crear-grupo" style="margin-top: 8px; font-size: 0.85rem; color: #475569; line-height: 1.45;">
+          La seguridad de la app está gestionada exclusivamente mediante <strong>Supabase Auth</strong> con correo electrónico verificado o passkeys biométricas. Para invitar a nuevas personas a tu grupo privado, genera un código de invitación desde la pestaña <strong>Grupos</strong>.
+        </p>
       </div>
     </section>
 
@@ -735,35 +705,21 @@
     </div>
   </div>
 
-  <!-- MODAL GESTIÓN DE USUARIOS Y PINS -->
+  <!-- MODAL GESTIÓN DE MIEMBROS -->
   <div id="modal-gestion-usuarios" class="modal-overlay" style="display: none;">
     <div class="modal-card modal-card-usuarios">
       <div class="modal-header">
-        <h3>👥 Gestión de Personas y PINs</h3>
+        <h3>👥 Miembros del Cuadrante</h3>
         <button id="btn-cerrar-modal-usuarios" class="btn-cerrar" title="Cerrar">&times;</button>
       </div>
       <div class="modal-body">
         <p class="modal-desc-sub">
-          Añade o quita miembros del cuadrante y configura el PIN de 4 dígitos de cada persona para que puedan entrar.
+          Consulta las personas dadas de alta en el sistema. Todos los usuarios acceden de forma segura con su cuenta verificada.
         </p>
-
-        <!-- Formulario para añadir nueva persona -->
-        <div class="box-nuevo-usuario">
-          <h4>➕ Añadir nueva persona</h4>
-          <div class="form-nuevo-usuario-row">
-            <input type="text" id="nuevo-user-nombre" placeholder="Nombre (ej: María)" maxlength="20">
-            <input type="password" id="nuevo-user-pin" placeholder="PIN (4 núm)" inputmode="numeric" maxlength="4">
-            <select id="nuevo-user-rol">
-              <option value="usuario">Usuario</option>
-              <option value="admin">Admin</option>
-            </select>
-            <button type="button" id="btn-crear-usuario" class="btn-sec-primario">Añadir</button>
-          </div>
-        </div>
 
         <!-- Lista de personas existentes -->
         <div class="seccion-lista-usuarios">
-          <h4>📋 Personas del grupo y sus PINs:</h4>
+          <h4>📋 Miembros registrados:</h4>
           <div id="lista-usuarios-gestion" class="lista-usuarios-gestion">
             <p class="loading-text">Cargando personas...</p>
           </div>
@@ -771,37 +727,6 @@
       </div>
       <div class="modal-footer">
         <button type="button" id="btn-cerrar-gestion-user" class="btn-sec-secundario">Cerrar</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- MODAL RÁPIDO PARA CREAR/CAMBIAR PIN (DESDE LOGIN O APP) -->
-  <div id="modal-crear-pin" class="modal-overlay" style="display: none;">
-    <div class="modal-card" style="max-width: 420px;">
-      <div class="modal-header">
-        <h3>🔑 Crear o Cambiar PIN</h3>
-        <button id="btn-cerrar-modal-pin" class="btn-cerrar" title="Cerrar">&times;</button>
-      </div>
-      <div class="modal-body">
-        <p class="modal-desc-sub">Elige tu nombre en el desplegable o escribe tu nombre si eres nuevo, y define tu PIN de 4 dígitos para entrar.</p>
-        
-        <div class="form-group" style="margin-bottom: 12px;">
-          <label for="pin-crear-nombre-sel">👤 Elige tu persona en el desplegable:</label>
-          <select id="pin-crear-nombre-sel" class="select-persona-dropdown" style="width: 100%; margin-bottom: 8px;"></select>
-          <label for="pin-crear-nombre" style="font-size: 0.8rem; color: #64748b;">O bien escribe un nuevo nombre:</label>
-          <input type="text" id="pin-crear-nombre" placeholder="Nuevo nombre (ej: Laura, Carlos...)">
-        </div>
-
-        <div class="form-group" style="margin-bottom: 12px;">
-          <label for="pin-crear-valor">🔒 Tu PIN de 4 dígitos:</label>
-          <div style="display: flex; gap: 8px; align-items: center;">
-            <input type="password" id="pin-crear-valor" placeholder="4 núm" inputmode="numeric" maxlength="4" style="letter-spacing: 6px; font-weight: 800; text-align: center; font-size: 1.2rem; flex: 1; padding: 10px; border-radius: 10px; border: 1.5px solid #cbd5e1;">
-            <button type="button" id="btn-toggle-eye-crear-pin" class="btn-chip-action" style="padding: 10px 14px; font-size: 1.1rem;" title="Mostrar/ocultar PIN">👁️</button>
-          </div>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" id="btn-guardar-mi-pin" class="btn-sec-primario">💾 Guardar PIN</button>
       </div>
     </div>
   </div>

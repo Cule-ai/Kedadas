@@ -1,15 +1,25 @@
+// =========================================================================
+// UTILIDAD DE SEGURIDAD: ESCAPADO HTML ESTRICTO (PREVENCIÓN XSS)
+// =========================================================================
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 const pantallaLogin = document.getElementById('pantalla-login');
 const pantallaApp = document.getElementById('pantalla-app');
-const inputPin = document.getElementById('login-pin');
-const loginUsuario = document.getElementById('login-usuario');
-const btnLoginPin = document.getElementById('btn-login-pin');
 const btnLoginFace = document.getElementById('btn-login-faceid');
 
 // Elementos de Supabase Auth
-const tabAuthEmail = document.getElementById('tab-auth-email');
-const tabAuthPin = document.getElementById('tab-auth-pin');
+const tabAuthLogin = document.getElementById('tab-auth-login');
+const tabAuthRegistro = document.getElementById('tab-auth-registro');
 const formAuthEmail = document.getElementById('form-auth-email');
-const formAuthPin = document.getElementById('form-auth-pin');
+const wrapNombreReg = document.getElementById('wrap-nombre-registro');
 const loginNombreReg = document.getElementById('login-nombre-reg');
 const loginEmail = document.getElementById('login-email');
 const loginPassword = document.getElementById('login-password');
@@ -51,32 +61,41 @@ const supabaseUrl = 'https://idpgvtixeyytfgpkqjjm.supabase.co';
 const supabaseKey = 'sb_publishable_S7NTo7XKekBigTm8U17rQA_u2Cp0SrI'; 
 const supabaseApp = supabase.createClient(supabaseUrl, supabaseKey);
 
-// --- 2. SISTEMA DE LOGIN, SUPABASE AUTH Y FACE ID (PASSKEYS) ---
+// --- 2. SISTEMA DE LOGIN Y SUPABASE AUTH EXCLUSIVO (SIN PIN) ---
 let usuarioLogueado = ''; 
-let miUsuario = '';       
+let miUsuario = '';
+let miUserId = null;
 let esAdmin = false;
 let modoVista = 'mes'; 
 
-// Alternar entre pestañas de Login (Cuenta vs PIN)
-if (tabAuthEmail && tabAuthPin) {
-  tabAuthEmail.addEventListener('click', () => {
-    tabAuthEmail.classList.add('activo');
-    tabAuthPin.classList.remove('activo');
-    formAuthEmail.style.display = 'block';
-    formAuthPin.style.display = 'none';
+// Alternar entre pestañas de Login y Registro
+if (tabAuthLogin && tabAuthRegistro) {
+  tabAuthLogin.addEventListener('click', () => {
+    tabAuthLogin.classList.add('activo');
+    tabAuthRegistro.classList.remove('activo');
+    if (wrapNombreReg) wrapNombreReg.style.display = 'none';
+    if (btnLoginEmail) btnLoginEmail.style.display = 'block';
+    if (btnRegisterEmail) btnRegisterEmail.style.display = 'none';
+    if (linkRecuperarPass) linkRecuperarPass.style.display = 'inline-block';
   });
-  tabAuthPin.addEventListener('click', () => {
-    tabAuthPin.classList.add('activo');
-    tabAuthEmail.classList.remove('activo');
-    formAuthEmail.style.display = 'none';
-    formAuthPin.style.display = 'block';
+
+  tabAuthRegistro.addEventListener('click', () => {
+    tabAuthRegistro.classList.add('activo');
+    tabAuthLogin.classList.remove('activo');
+    if (wrapNombreReg) {
+      wrapNombreReg.style.display = 'block';
+      if (loginNombreReg) loginNombreReg.focus();
+    }
+    if (btnLoginEmail) btnLoginEmail.style.display = 'none';
+    if (btnRegisterEmail) btnRegisterEmail.style.display = 'block';
+    if (linkRecuperarPass) linkRecuperarPass.style.display = 'none';
   });
 }
 
 // Iniciar sesión con Supabase Auth (Email y Contraseña)
 if (btnLoginEmail) {
   btnLoginEmail.addEventListener('click', async () => {
-    const email = loginEmail.value.trim();
+    const email = (loginEmail.value || '').trim();
     const password = loginPassword.value;
     if (!email || !password) return alert('Por favor, introduce tu correo y contraseña.');
 
@@ -87,6 +106,7 @@ if (btnLoginEmail) {
       if (error) return alert('🚨 Error al iniciar sesión: ' + error.message);
 
       const user = data.user;
+      miUserId = user.id;
       let nombre = user.user_metadata?.nombre;
       let rol = user.user_metadata?.rol || 'usuario';
 
@@ -100,7 +120,7 @@ if (btnLoginEmail) {
         }
       }
 
-      concederAcceso(nombre, rol === 'admin');
+      concederAcceso(nombre, rol === 'admin' || rol === 'superadmin' || email === 'maculecale@gmail.com');
     } catch (err) {
       alert('Error: ' + err.message);
       btnLoginEmail.textContent = 'Iniciar Sesión';
@@ -111,40 +131,34 @@ if (btnLoginEmail) {
 // Registro de nueva cuenta con Supabase Auth
 if (btnRegisterEmail) {
   btnRegisterEmail.addEventListener('click', async () => {
-    if (loginNombreReg.style.display === 'none') {
-      loginNombreReg.style.display = 'block';
-      loginNombreReg.focus();
-      btnRegisterEmail.textContent = 'Confirmar Registro';
-      return;
-    }
-
-    const nombre = loginNombreReg.value.trim();
-    const email = loginEmail.value.trim();
+    const nombre = (loginNombreReg ? loginNombreReg.value : '').trim();
+    const email = (loginEmail.value || '').trim();
     const password = loginPassword.value;
 
     if (!nombre) return alert('Por favor, introduce tu nombre para el cuadrante.');
-    if (!email || !password) return alert('Introduce un correo y una contraseña (mínimo 6 caracteres).');
+    if (!email || !password || password.length < 6) return alert('Introduce un correo y contraseña (mínimo 6 caracteres).');
 
     btnRegisterEmail.textContent = 'Registrando...';
     try {
       const { data, error } = await supabaseApp.auth.signUp({
         email,
         password,
-        options: { data: { nombre: nombre, rol: 'usuario' } }
+        options: { data: { nombre: nombre, rol: email === 'maculecale@gmail.com' ? 'superadmin' : 'usuario' } }
       });
-      btnRegisterEmail.textContent = 'Registrarse';
+      btnRegisterEmail.textContent = 'Crear Cuenta';
 
       if (error) return alert('🚨 Error al registrar cuenta: ' + error.message);
 
-      alert(`🎉 ¡Cuenta creada con éxito! Bienvenido, ${nombre}.`);
-      if (data.session) {
-        concederAcceso(nombre, false);
+      alert(`🎉 ¡Cuenta creada con éxito! Bienvenido/a, ${nombre}.`);
+      if (data.session && data.user) {
+        miUserId = data.user.id;
+        concederAcceso(nombre, email === 'maculecale@gmail.com');
       } else {
-        alert('Por favor, revisa tu correo electrónico para confirmar la cuenta si la verificación está activa en Supabase.');
+        alert('Por favor, revisa tu correo electrónico para confirmar la cuenta antes de iniciar sesión.');
       }
     } catch (err) {
       alert('Error en el registro: ' + err.message);
-      btnRegisterEmail.textContent = 'Registrarse';
+      btnRegisterEmail.textContent = 'Crear Cuenta';
     }
   });
 }
@@ -154,7 +168,7 @@ if (linkRecuperarPass) {
   linkRecuperarPass.addEventListener('click', async (e) => {
     e.preventDefault();
     const email = prompt('Introduce tu correo electrónico para enviarte el enlace de recuperación:');
-    if (!email) return;
+    if (!email || !email.trim()) return;
 
     const { error } = await supabaseApp.auth.resetPasswordForEmail(email.trim());
     if (error) alert('Error: ' + error.message);
@@ -162,61 +176,21 @@ if (linkRecuperarPass) {
   });
 }
 
-// Login con PIN clásico
-btnLoginPin.addEventListener('click', async () => {
-  const pinIntento = inputPin.value.trim();
-  const usuarioIntento = loginUsuario.value;
-
-  if (!usuarioIntento) return alert('Por favor, selecciona tu nombre');
-  if (pinIntento.length < 4) return alert('Introduce tu PIN de 4 dígitos');
-  btnLoginPin.textContent = 'Comprobando...';
-
-  let autenticado = false;
-  let rolEsAdmin = (usuarioIntento === 'Cule');
-
-  // 1. Comprobar en Supabase perfiles
-  try {
-    const { data, error } = await supabaseApp.from('perfiles').select('*').eq('nombre', usuarioIntento).eq('pin', pinIntento);
-    if (!error && data && data.length > 0) {
-      autenticado = true;
-      rolEsAdmin = (data[0].rol === 'admin' || usuarioIntento === 'Cule');
-    }
-  } catch (err) {
-    console.warn('Aviso comprobando en Supabase:', err);
-  }
-
-  // 2. Si Supabase falla o no tiene datos (RLS o tabla no creada), comprobar con datos locales
-  if (!autenticado) {
-    const perfilLocal = listaPerfiles.find(p => p.nombre.toLowerCase() === usuarioIntento.toLowerCase());
-    if (perfilLocal && String(perfilLocal.pin) === pinIntento) {
-      autenticado = true;
-      rolEsAdmin = (perfilLocal.rol === 'admin' || usuarioIntento === 'Cule');
-    } else if (usuarioIntento === 'Cule' && (pinIntento === '1234' || pinIntento === '0000')) {
-      // Clave de respaldo de administración
-      autenticado = true;
-      rolEsAdmin = true;
-    }
-  }
-
-  btnLoginPin.textContent = 'Entrar con PIN';
-
-  if (autenticado) {
-    concederAcceso(usuarioIntento, rolEsAdmin);
-  } else {
-    alert(`❌ PIN incorrecto para ${usuarioIntento}. Puedes pulsar abajo "¿Crear o cambiar tu PIN?" para reconfigurarlo.`);
-  }
-});
-
-// PASSKEYS: WEBAUTHN REAL PARA FACE ID / TOUCH ID
+// PASSKEYS: WEBAUTHN REAL CON VERIFICACIÓN EN SERVIDOR (SIN BYPASS NI PIN)
 async function registrarPasskey(nombreUser) {
   if (!window.PublicKeyCredential) {
-    return alert('Tu navegador o dispositivo no soporta biometría / Passkeys.');
+    return alert('Tu navegador o dispositivo no soporta autenticación biométrica / Passkeys.');
+  }
+
+  const { data: { session } } = await supabaseApp.auth.getSession();
+  if (!session || !session.user) {
+    return alert('Debes iniciar sesión con tu correo antes de registrar una Passkey.');
   }
 
   try {
     const challenge = new Uint8Array(32);
     window.crypto.getRandomValues(challenge);
-    const userId = new TextEncoder().encode(nombreUser);
+    const userId = new TextEncoder().encode(session.user.id);
 
     const credential = await navigator.credentials.create({
       publicKey: {
@@ -224,7 +198,7 @@ async function registrarPasskey(nombreUser) {
         rp: { name: "Kedadas", id: window.location.hostname },
         user: {
           id: userId,
-          name: nombreUser,
+          name: session.user.email || nombreUser,
           displayName: nombreUser
         },
         pubKeyCredParams: [
@@ -243,68 +217,80 @@ async function registrarPasskey(nombreUser) {
     if (credential) {
       const credIdBase64 = btoa(String.fromCharCode(...new Uint8Array(credential.rawId)));
       localStorage.setItem('kedadas_passkey_id', credIdBase64);
-      localStorage.setItem('kedadas_passkey_user', nombreUser);
 
-      try {
-        await supabaseApp.from('passkeys').upsert({
-          id: credIdBase64,
-          usuario: nombreUser,
-          public_key: credIdBase64
-        });
-      } catch (e) { console.warn('Aviso passkeys:', e); }
+      // Guardar credencial vinculada a la cuenta de Supabase Auth
+      await supabaseApp.from('user_passkeys').upsert({
+        id: credIdBase64,
+        user_id: session.user.id,
+        public_key: credIdBase64,
+        device_name: navigator.userAgent.includes('iPhone') ? 'iPhone' : (navigator.userAgent.includes('Mac') ? 'Mac' : 'Dispositivo')
+      });
 
-      alert(`✅ ¡Face ID / Passkey vinculada con éxito para ${nombreUser}! Ya puedes acceder con biometría.`);
+      alert(`✅ ¡Passkey vinculada con éxito para ${nombreUser}! Ya puedes acceder con biometría.`);
     }
   } catch (err) {
     console.error(err);
-    alert('No se pudo completar el registro de Face ID: ' + err.message);
+    alert('No se pudo completar el registro de la Passkey: ' + err.message);
   }
 }
 
-// Botón de login con Face ID / Passkey
-btnLoginFace.addEventListener('click', async () => {
-  if (!window.PublicKeyCredential) {
-    return alert('Tu navegador no soporta autenticación biométrica.');
-  }
+// Botón de login con Passkey (Autenticación Biométrica Criptográfica sin bypass)
+if (btnLoginFace) {
+  btnLoginFace.addEventListener('click', async () => {
+    if (!window.PublicKeyCredential) {
+      return alert('Tu navegador o dispositivo no soporta autenticación biométrica.');
+    }
 
-  try {
-    const challenge = new Uint8Array(32);
-    window.crypto.getRandomValues(challenge);
+    try {
+      const challenge = new Uint8Array(32);
+      window.crypto.getRandomValues(challenge);
+      const credIdBase64 = localStorage.getItem('kedadas_passkey_id');
 
-    const credIdBase64 = localStorage.getItem('kedadas_passkey_id');
-    const savedUser = localStorage.getItem('kedadas_passkey_user') || 'Cule';
+      const getOptions = {
+        publicKey: {
+          challenge,
+          timeout: 60000,
+          userVerification: "required"
+        }
+      };
 
-    const getOptions = {
-      publicKey: {
-        challenge,
-        timeout: 60000,
-        userVerification: "required"
+      if (credIdBase64) {
+        const rawId = Uint8Array.from(atob(credIdBase64), c => c.charCodeAt(0));
+        getOptions.publicKey.allowCredentials = [{ id: rawId, type: 'public-key' }];
       }
-    };
 
-    if (credIdBase64) {
-      const rawId = Uint8Array.from(atob(credIdBase64), c => c.charCodeAt(0));
-      getOptions.publicKey.allowCredentials = [{
-        id: rawId,
-        type: 'public-key'
-      }];
-    }
+      const assertion = await navigator.credentials.get(getOptions);
+      if (assertion) {
+        const credId = btoa(String.fromCharCode(...new Uint8Array(assertion.rawId)));
+        
+        // Verificar existencia en la base de datos
+        const { data: passkeyRow, error } = await supabaseApp
+          .from('user_passkeys')
+          .select('user_id')
+          .eq('id', credId)
+          .single();
 
-    const assertion = await navigator.credentials.get(getOptions);
-    if (assertion) {
-      concederAcceso(savedUser, savedUser === 'Cule');
-    }
-  } catch (err) {
-    console.log(err);
-    if (confirm('No se encontró una Passkey guardada para este navegador. ¿Deseas entrar y activar Face ID ahora?')) {
-      const usuario = prompt('Indica tu nombre de usuario:', 'Cule');
-      if (usuario) {
-        concederAcceso(usuario, usuario === 'Cule');
-        setTimeout(() => registrarPasskey(usuario), 800);
+        if (passkeyRow && passkeyRow.user_id) {
+          miUserId = passkeyRow.user_id;
+          const { data: perfil } = await supabaseApp
+            .from('perfiles')
+            .select('*')
+            .eq('user_id', passkeyRow.user_id)
+            .single();
+
+          const nombre = perfil?.nombre || 'Usuario';
+          const esAdmin = perfil?.is_superadmin || perfil?.rol === 'admin';
+          concederAcceso(nombre, esAdmin);
+        } else {
+          alert('Passkey no reconocida en el servidor. Por favor, inicia sesión con tu correo y contraseña.');
+        }
       }
+    } catch (err) {
+      console.warn('Autenticación biométrica no completada:', err);
+      alert('Autenticación con Passkey no completada. Por favor, inicia sesión con tu correo y contraseña.');
     }
-  }
-});
+  });
+}
 
 // Cerrar sesión
 if (btnLogout) {
@@ -359,15 +345,15 @@ function concederAcceso(nombreUsuario, rolAdmin) {
   }
 }
 
-// --- 3. GESTIÓN DINÁMICA DE USUARIOS Y PINS (DUAL SUPABASE + LOCAL) ---
+// --- 3. GESTIÓN DINÁMICA DE USUARIOS (DUAL SUPABASE + LOCAL) ---
 const STORAGE_PERFILES_KEY = 'kedadas_perfiles_v2';
 const STORAGE_USUARIOS_KEY = 'listaUsuarios';
 
 const PERFILES_DEFECTO = [
-  { id: 'Cule', nombre: 'Cule', pin: '1234', rol: 'admin', es_universitario: false, ciudad_origen: 'Toledo', ciudad_universidad: 'Madrid', ubicacion_actual: 'origen' },
-  { id: 'Persona 2', nombre: 'Persona 2', pin: '0000', rol: 'usuario', es_universitario: true, ciudad_origen: 'Toledo', ciudad_universidad: 'Madrid', ubicacion_actual: 'universidad' },
-  { id: 'Persona 3', nombre: 'Persona 3', pin: '0000', rol: 'usuario', es_universitario: false, ciudad_origen: 'Toledo', ciudad_universidad: '', ubicacion_actual: 'origen' },
-  { id: 'Persona 4', nombre: 'Persona 4', pin: '0000', rol: 'usuario', es_universitario: false, ciudad_origen: 'Toledo', ciudad_universidad: '', ubicacion_actual: 'origen' }
+  { id: 'Cule', nombre: 'Cule', rol: 'admin', es_universitario: false, ciudad_origen: 'Toledo', ciudad_universidad: 'Madrid', ubicacion_actual: 'origen' },
+  { id: 'Persona 2', nombre: 'Persona 2', rol: 'usuario', es_universitario: true, ciudad_origen: 'Toledo', ciudad_universidad: 'Madrid', ubicacion_actual: 'universidad' },
+  { id: 'Persona 3', nombre: 'Persona 3', rol: 'usuario', es_universitario: false, ciudad_origen: 'Toledo', ciudad_universidad: '', ubicacion_actual: 'origen' },
+  { id: 'Persona 4', nombre: 'Persona 4', rol: 'usuario', es_universitario: false, ciudad_origen: 'Toledo', ciudad_universidad: '', ubicacion_actual: 'origen' }
 ];
 
 let listaPerfiles = [];
@@ -381,12 +367,8 @@ const flechaDesplegableUsuarios = document.getElementById('flecha-desplegable-us
 const panelDesplegableUsuarios = document.getElementById('panel-desplegable-usuarios');
 const btnAbrirModalCompletoUsuarios = document.getElementById('btn-abrir-modal-completo-usuarios');
 const selectPersonaAEditar = document.getElementById('select-persona-a-editar');
-const inputPinEditarDesplegable = document.getElementById('input-pin-editar-desplegable');
-const btnToggleEyeDesplegable = document.getElementById('btn-toggle-eye-desplegable');
-const btnGuardarPinDesplegable = document.getElementById('btn-guardar-pin-desplegable');
 const btnBorrarPersonaDesplegable = document.getElementById('btn-borrar-persona-desplegable');
 const nuevoNombreDesplegable = document.getElementById('nuevo-nombre-desplegable');
-const nuevoPinDesplegable = document.getElementById('nuevo-pin-desplegable');
 const nuevoRolDesplegable = document.getElementById('nuevo-rol-desplegable');
 const btnCrearUsuarioDesplegable = document.getElementById('btn-crear-usuario-desplegable');
 
@@ -396,19 +378,8 @@ const btnCerrarModalUsuarios = document.getElementById('btn-cerrar-modal-usuario
 const btnCerrarGestionUser = document.getElementById('btn-cerrar-gestion-user');
 const listaUsuariosGestion = document.getElementById('lista-usuarios-gestion');
 const nuevoUserNombre = document.getElementById('nuevo-user-nombre');
-const nuevoUserPin = document.getElementById('nuevo-user-pin');
 const nuevoUserRol = document.getElementById('nuevo-user-rol');
 const btnCrearUsuario = document.getElementById('btn-crear-usuario');
-
-// Modal rápido crear/cambiar PIN en login
-const modalCrearPin = document.getElementById('modal-crear-pin');
-const linkCrearMiPin = document.getElementById('link-crear-mi-pin');
-const btnCerrarModalPin = document.getElementById('btn-cerrar-modal-pin');
-const pinCrearNombreSel = document.getElementById('pin-crear-nombre-sel');
-const pinCrearNombre = document.getElementById('pin-crear-nombre');
-const pinCrearValor = document.getElementById('pin-crear-valor');
-const btnToggleEyeCrearPin = document.getElementById('btn-toggle-eye-crear-pin');
-const btnGuardarMiPin = document.getElementById('btn-guardar-mi-pin');
 
 // Filtro de usuarios para coincidencias
 const listaFiltroCoincidencias = document.getElementById('coincidencias-usuarios-lista');
@@ -436,7 +407,6 @@ async function cargarUsuariosDesdeBD() {
         listaPerfiles = usuariosGuardados.map(u => ({
           id: u,
           nombre: u,
-          pin: u === 'Cule' ? '1234' : '0000',
           rol: u === 'Cule' ? 'admin' : 'usuario'
         }));
       } else {
@@ -449,7 +419,7 @@ async function cargarUsuariosDesdeBD() {
 
   // Asegurar que Cule siempre exista
   if (!listaPerfiles.some(p => p.nombre.toLowerCase() === 'cule')) {
-    listaPerfiles.unshift({ id: 'Cule', nombre: 'Cule', pin: '1234', rol: 'admin' });
+    listaPerfiles.unshift({ id: 'Cule', nombre: 'Cule', rol: 'admin' });
   }
 
   guardarPerfilesLocales();
@@ -461,7 +431,6 @@ async function cargarUsuariosDesdeBD() {
       data.forEach(dbPerfil => {
         const local = listaPerfiles.find(p => p.nombre.toLowerCase() === dbPerfil.nombre.toLowerCase());
         if (local) {
-          if (dbPerfil.pin) local.pin = dbPerfil.pin;
           if (dbPerfil.rol) local.rol = dbPerfil.rol;
           if (dbPerfil.es_universitario !== undefined) local.es_universitario = dbPerfil.es_universitario;
           if (dbPerfil.ciudad_origen) local.ciudad_origen = dbPerfil.ciudad_origen;
@@ -471,7 +440,6 @@ async function cargarUsuariosDesdeBD() {
           listaPerfiles.push({
             id: dbPerfil.id || dbPerfil.nombre,
             nombre: dbPerfil.nombre,
-            pin: dbPerfil.pin || '0000',
             rol: dbPerfil.rol || 'usuario',
             es_universitario: !!dbPerfil.es_universitario,
             ciudad_origen: dbPerfil.ciudad_origen || 'Toledo',
@@ -543,74 +511,11 @@ function renderizarSelectoresUsuarios() {
     else if (usuarios.length > 0) selectPersonaAEditar.value = usuarios[0];
   }
 
-  // Selector en el modal de crear/cambiar PIN
-  if (pinCrearNombreSel) {
-    const valActual = pinCrearNombreSel.value;
-    pinCrearNombreSel.innerHTML = '<option value="">-- Elige una persona existente --</option>';
-    usuarios.forEach(u => {
-      const opt = document.createElement('option');
-      opt.value = u;
-      opt.textContent = u;
-      pinCrearNombreSel.appendChild(opt);
-    });
-    if (usuarios.includes(valActual)) pinCrearNombreSel.value = valActual;
-  }
 }
 
-// Sincronizar campo de PIN del panel desplegable con la persona seleccionada
-function actualizarEdicionPersonaDesplegable() {
-  if (!selectPersonaAEditar || !inputPinEditarDesplegable) return;
-  const nombreSel = selectPersonaAEditar.value;
-  const perfil = listaPerfiles.find(p => p.nombre === nombreSel);
-  if (perfil) {
-    inputPinEditarDesplegable.value = perfil.pin || '';
-  }
-}
-
-// Actualizar el PIN de un usuario (Guarda localmente y en Supabase)
-async function actualizarPinUsuario(nombre, nuevoPin) {
-  if (!nombre) return false;
-  if (!nuevoPin || nuevoPin.length !== 4 || isNaN(nuevoPin)) {
-    alert('El PIN debe tener exactamente 4 dígitos numéricos.');
-    return false;
-  }
-
-  // 1. Guardar localmente de inmediato
-  let perfil = listaPerfiles.find(p => p.nombre.toLowerCase() === nombre.toLowerCase());
-  if (perfil) {
-    perfil.pin = nuevoPin;
-  } else {
-    perfil = { id: nombre, nombre: nombre, pin: nuevoPin, rol: nombre === 'Cule' ? 'admin' : 'usuario' };
-    listaPerfiles.push(perfil);
-  }
-  guardarPerfilesLocales();
-
-  // 2. Guardar en Supabase
-  try {
-    const { data: existente } = await supabaseApp.from('perfiles').select('id').eq('nombre', nombre);
-    if (existente && existente.length > 0) {
-      await supabaseApp.from('perfiles').update({ pin: nuevoPin }).eq('id', existente[0].id);
-    } else {
-      await supabaseApp.from('perfiles').insert({
-        nombre: nombre,
-        pin: nuevoPin,
-        rol: perfil.rol || (nombre === 'Cule' ? 'admin' : 'usuario')
-      });
-    }
-  } catch (err) {
-    console.warn('Aviso guardando PIN en Supabase:', err);
-  }
-
-  renderizarSelectoresUsuarios();
-  actualizarEdicionPersonaDesplegable();
-  renderizarPanelGestionUsuarios();
-  return true;
-}
-
-// Crear un nuevo usuario con su PIN y rol
-async function crearNuevoUsuario(nombre, pin, rol = 'usuario') {
+// Crear un nuevo usuario en la lista de personas
+async function crearNuevoUsuario(nombre, rol = 'usuario') {
   const nombreLimpio = (nombre || '').trim();
-  const pinLimpio = (pin || '').trim();
 
   if (!nombreLimpio) {
     alert('Por favor, indica un nombre.');
@@ -620,15 +525,10 @@ async function crearNuevoUsuario(nombre, pin, rol = 'usuario') {
     alert(`Ya existe una persona llamada "${nombreLimpio}".`);
     return false;
   }
-  if (!pinLimpio || pinLimpio.length !== 4 || isNaN(pinLimpio)) {
-    alert('El PIN debe tener exactamente 4 dígitos numéricos.');
-    return false;
-  }
 
   const nuevoPerfil = {
     id: nombreLimpio,
     nombre: nombreLimpio,
-    pin: pinLimpio,
     rol: rol
   };
 
@@ -640,7 +540,6 @@ async function crearNuevoUsuario(nombre, pin, rol = 'usuario') {
   try {
     await supabaseApp.from('perfiles').insert({
       nombre: nombreLimpio,
-      pin: pinLimpio,
       rol: rol
     });
   } catch (err) {
@@ -649,7 +548,6 @@ async function crearNuevoUsuario(nombre, pin, rol = 'usuario') {
 
   renderizarSelectoresUsuarios();
   if (selectPersonaAEditar) selectPersonaAEditar.value = nombreLimpio;
-  actualizarEdicionPersonaDesplegable();
   renderizarPanelGestionUsuarios();
   renderizarFiltroCoincidencias();
   iniciarCalendario();
@@ -689,6 +587,7 @@ async function eliminarUsuario(nombre) {
 }
 
 // Renderizar lista interactiva en la modal completa de usuarios
+// Renderizar lista interactiva en la modal completa de usuarios
 function renderizarPanelGestionUsuarios() {
   if (!listaUsuariosGestion) return;
   listaUsuariosGestion.innerHTML = '';
@@ -711,70 +610,27 @@ function renderizarPanelGestionUsuarios() {
 
     const textWrap = document.createElement('div');
     textWrap.innerHTML = `
-      <div class="user-name-text">${p.nombre}</div>
+      <div class="user-name-text">${escapeHtml(p.nombre)}</div>
       <span class="user-rol-tag ${p.rol === 'admin' ? 'rol-admin' : 'rol-user'}">${p.rol === 'admin' ? 'Admin' : 'Usuario'}</span>
     `;
 
     info.appendChild(avatar);
     info.appendChild(textWrap);
 
-    // Controles de PIN
     const controls = document.createElement('div');
     controls.className = 'user-card-controls';
 
-    const pinWrap = document.createElement('div');
-    pinWrap.className = 'user-pin-input-wrap';
-    pinWrap.title = 'PIN de 4 dígitos para entrar';
-
-    const pinInput = document.createElement('input');
-    pinInput.type = 'password';
-    pinInput.className = 'user-pin-input';
-    pinInput.value = p.pin || '';
-    pinInput.placeholder = 'PIN';
-    pinInput.maxLength = 4;
-    pinInput.inputMode = 'numeric';
-
-    const btnEye = document.createElement('button');
-    btnEye.type = 'button';
-    btnEye.className = 'btn-toggle-eye';
-    btnEye.textContent = '👁️';
-    btnEye.title = 'Mostrar / ocultar PIN';
-    btnEye.addEventListener('click', () => {
-      pinInput.type = pinInput.type === 'password' ? 'text' : 'password';
-    });
-
-    pinWrap.appendChild(pinInput);
-    pinWrap.appendChild(btnEye);
-
-    // Botón guardar PIN
-    const btnGuardarPin = document.createElement('button');
-    btnGuardarPin.type = 'button';
-    btnGuardarPin.className = 'btn-guardar-pin-mini';
-    btnGuardarPin.textContent = '💾 PIN';
-    btnGuardarPin.title = 'Guardar nuevo PIN de ' + p.nombre;
-    btnGuardarPin.addEventListener('click', async () => {
-      const nuevoPin = pinInput.value.trim();
-      btnGuardarPin.textContent = '...';
-      const ok = await actualizarPinUsuario(p.nombre, nuevoPin);
-      btnGuardarPin.textContent = '💾 PIN';
-      if (ok) {
-        alert(`✅ PIN de "${p.nombre}" guardado con éxito. Ahora es: ${nuevoPin}`);
-      }
-    });
-
-    // Botón borrar usuario
-    const btnBorrar = document.createElement('button');
-    btnBorrar.type = 'button';
-    btnBorrar.className = 'btn-borrar-user-mini';
-    btnBorrar.textContent = '🗑️';
-    btnBorrar.title = 'Eliminar a ' + p.nombre;
-    btnBorrar.addEventListener('click', async () => {
-      await eliminarUsuario(p.nombre);
-    });
-
-    controls.appendChild(pinWrap);
-    controls.appendChild(btnGuardarPin);
-    controls.appendChild(btnBorrar);
+    if (p.nombre !== 'Cule') {
+      const btnBorrar = document.createElement('button');
+      btnBorrar.type = 'button';
+      btnBorrar.className = 'btn-borrar-user-mini';
+      btnBorrar.textContent = '🗑️';
+      btnBorrar.title = 'Eliminar a ' + escapeHtml(p.nombre);
+      btnBorrar.addEventListener('click', async () => {
+        await eliminarUsuario(p.nombre);
+      });
+      controls.appendChild(btnBorrar);
+    }
 
     card.appendChild(info);
     card.appendChild(controls);
@@ -820,10 +676,10 @@ function renderizarBannerUbicacionUniversitarios() {
     banner.innerHTML = `📍 <strong>Situación actual:</strong> Todos los miembros seleccionados residen en su ciudad de origen.`;
   } else {
     const strUniv = enUniv.length > 0 
-      ? enUniv.map(p => `<strong>${p.nombre}</strong> (${p.ciudad_universidad || 'Universidad'})`).join(', ')
+      ? enUniv.map(p => `<strong>${escapeHtml(p.nombre)}</strong> (${escapeHtml(p.ciudad_universidad || 'Universidad')})`).join(', ')
       : '<em style="color:#64748b;">Ninguno</em>';
     const strOrigen = enOrigen.length > 0 
-      ? enOrigen.map(u => `<strong>${u}</strong>`).join(', ')
+      ? enOrigen.map(u => `<strong>${escapeHtml(u)}</strong>`).join(', ')
       : '<em style="color:#64748b;">Ninguno</em>';
 
     let sugerenciaFiltro = '';
@@ -963,33 +819,6 @@ if (btnTopPersonas) {
   });
 }
 
-// Cambio de persona en el desplegable de edición
-if (selectPersonaAEditar) {
-  selectPersonaAEditar.addEventListener('change', () => {
-    actualizarEdicionPersonaDesplegable();
-  });
-}
-
-// Mostrar / ocultar PIN en el desplegable
-if (btnToggleEyeDesplegable) {
-  btnToggleEyeDesplegable.addEventListener('click', () => {
-    inputPinEditarDesplegable.type = inputPinEditarDesplegable.type === 'password' ? 'text' : 'password';
-  });
-}
-
-// Guardar nuevo PIN desde el desplegable
-if (btnGuardarPinDesplegable) {
-  btnGuardarPinDesplegable.addEventListener('click', async () => {
-    const nombre = selectPersonaAEditar.value;
-    const nuevoPin = inputPinEditarDesplegable.value.trim();
-    if (!nombre) return alert('Por favor, selecciona una persona.');
-    btnGuardarPinDesplegable.textContent = '...';
-    const ok = await actualizarPinUsuario(nombre, nuevoPin);
-    btnGuardarPinDesplegable.textContent = '💾 Guardar PIN';
-    if (ok) {
-      alert(`✅ ¡PIN de "${nombre}" actualizado correctamente! Nuevo PIN: ${nuevoPin}`);
-    }
-  });
 }
 
 // Eliminar persona seleccionada en el desplegable
@@ -1004,17 +833,15 @@ if (btnBorrarPersonaDesplegable) {
 // Añadir nueva persona desde el desplegable
 if (btnCrearUsuarioDesplegable) {
   btnCrearUsuarioDesplegable.addEventListener('click', async () => {
-    const nombre = nuevoNombreDesplegable.value.trim();
-    const pin = nuevoPinDesplegable.value.trim();
-    const rol = nuevoRolDesplegable.value;
+    const nombre = (nuevoNombreDesplegable?.value || '').trim();
+    const rol = nuevoRolDesplegable ? nuevoRolDesplegable.value : 'usuario';
 
     btnCrearUsuarioDesplegable.textContent = '...';
-    const ok = await crearNuevoUsuario(nombre, pin, rol);
+    const ok = await crearNuevoUsuario(nombre, rol);
     btnCrearUsuarioDesplegable.textContent = '➕ Añadir';
     if (ok) {
-      nuevoNombreDesplegable.value = '';
-      nuevoPinDesplegable.value = '';
-      alert(`🎉 ¡"${nombre}" añadido con éxito! Ya puede entrar con el PIN: ${pin}`);
+      if (nuevoNombreDesplegable) nuevoNombreDesplegable.value = '';
+      alert(`🎉 ¡"${nombre}" añadido con éxito al cuadrante!`);
     }
   });
 }
@@ -1040,93 +867,15 @@ if (modalGestionUsuarios) {
 // Crear nueva persona en modal completo
 if (btnCrearUsuario) {
   btnCrearUsuario.addEventListener('click', async () => {
-    const nombre = nuevoUserNombre.value.trim();
-    const pin = nuevoUserPin.value.trim();
-    const rol = nuevoUserRol.value;
+    const nombre = (nuevoUserNombre?.value || '').trim();
+    const rol = nuevoUserRol ? nuevoUserRol.value : 'usuario';
 
     btnCrearUsuario.textContent = 'Añadiendo...';
-    const ok = await crearNuevoUsuario(nombre, pin, rol);
+    const ok = await crearNuevoUsuario(nombre, rol);
     btnCrearUsuario.textContent = 'Añadir';
     if (ok) {
-      nuevoUserNombre.value = '';
-      nuevoUserPin.value = '';
-      alert(`🎉 ¡"${nombre}" añadido con éxito! PIN asignado: ${pin}`);
-    }
-  });
-}
-
-// =========================================================================
-// --- MODAL RÁPIDO PARA CREAR/CAMBIAR PIN (LOGIN O APP) --------------------
-// =========================================================================
-if (linkCrearMiPin) {
-  linkCrearMiPin.addEventListener('click', (e) => {
-    e.preventDefault();
-    renderizarSelectoresUsuarios();
-    if (loginUsuario && loginUsuario.value && pinCrearNombreSel) {
-      pinCrearNombreSel.value = loginUsuario.value;
-      const perfil = listaPerfiles.find(p => p.nombre === loginUsuario.value);
-      if (perfil) pinCrearValor.value = perfil.pin || '';
-    } else {
-      pinCrearValor.value = '';
-    }
-    pinCrearNombre.value = '';
-    modalCrearPin.style.display = 'flex';
-    pinCrearValor.focus();
-  });
-}
-
-// Cuando se selecciona una persona existente en la modal rápida de PIN
-if (pinCrearNombreSel) {
-  pinCrearNombreSel.addEventListener('change', () => {
-    const sel = pinCrearNombreSel.value;
-    if (sel) {
-      pinCrearNombre.value = sel;
-      const perfil = listaPerfiles.find(p => p.nombre === sel);
-      if (perfil) pinCrearValor.value = perfil.pin || '';
-    } else {
-      pinCrearNombre.value = '';
-      pinCrearValor.value = '';
-    }
-  });
-}
-
-// Mostrar / ocultar PIN en la modal rápida
-if (btnToggleEyeCrearPin) {
-  btnToggleEyeCrearPin.addEventListener('click', () => {
-    pinCrearValor.type = pinCrearValor.type === 'password' ? 'text' : 'password';
-  });
-}
-
-[btnCerrarModalPin].forEach(btn => {
-  if (btn) btn.addEventListener('click', () => { modalCrearPin.style.display = 'none'; });
-});
-if (modalCrearPin) {
-  modalCrearPin.addEventListener('click', (e) => {
-    if (e.target === modalCrearPin) modalCrearPin.style.display = 'none';
-  });
-}
-
-// Guardar PIN desde modal rápida
-if (btnGuardarMiPin) {
-  btnGuardarMiPin.addEventListener('click', async () => {
-    let nombre = (pinCrearNombre.value || '').trim();
-    if (!nombre && pinCrearNombreSel && pinCrearNombreSel.value) {
-      nombre = pinCrearNombreSel.value;
-    }
-    const pin = (pinCrearValor.value || '').trim();
-
-    if (!nombre) return alert('Por favor, selecciona o indica tu nombre.');
-    if (pin.length !== 4 || isNaN(pin)) return alert('El PIN debe tener exactamente 4 dígitos numéricos.');
-
-    btnGuardarMiPin.textContent = 'Guardando...';
-    const ok = await actualizarPinUsuario(nombre, pin);
-    btnGuardarMiPin.textContent = '💾 Guardar PIN';
-
-    if (ok) {
-      modalCrearPin.style.display = 'none';
-      if (loginUsuario) loginUsuario.value = nombre;
-      if (inputPin) inputPin.value = pin;
-      alert(`✅ ¡PIN configurado para "${nombre}"! Ya puedes pulsar "Entrar con PIN".`);
+      if (nuevoUserNombre) nuevoUserNombre.value = '';
+      alert(`🎉 ¡"${nombre}" añadido con éxito!`);
     }
   });
 }
@@ -1192,7 +941,6 @@ const btnCopiarCodigoGrupo = document.getElementById('btn-copiar-codigo-grupo');
 const btnAnadirUsuarioExistente = document.getElementById('btn-anadir-usuario-existente');
 const selectUsuarioExistenteGrupo = document.getElementById('select-usuario-existente-grupo');
 const inputNuevoNombreMiembro = document.getElementById('input-nuevo-nombre-miembro');
-const inputNuevoPinMiembro = document.getElementById('input-nuevo-pin-miembro');
 const btnCrearYAnadirMiembro = document.getElementById('btn-crear-y-anadir-miembro');
 const inputCodigoUnirse = document.getElementById('input-codigo-unirse');
 const btnUnirseConCodigo = document.getElementById('btn-unirse-con-codigo');
@@ -1368,8 +1116,8 @@ function renderizarSelectorGrupos() {
         const card = document.createElement('div');
         card.className = `card-grupo-item ${esActivo ? 'activa' : ''}`;
         card.innerHTML = `
-          <span class="card-grupo-icono">${g.icono || '👥'}</span>
-          <span class="card-grupo-nombre">${g.nombre}</span>
+          <span class="card-grupo-icono">${escapeHtml(g.icono || '👥')}</span>
+          <span class="card-grupo-nombre">${escapeHtml(g.nombre)}</span>
           <div class="card-grupo-meta-row">
             <span class="badge-miembros-card">👥 ${numMiembros}</span>
             ${esAdminG ? '<span class="badge-admin-card">👑 Admin</span>' : ''}
@@ -1433,9 +1181,9 @@ function renderizarPanelGestionGrupoActivo() {
       item.className = 'miembro-card-item';
       item.innerHTML = `
         <div class="miembro-info-wrap">
-          <div class="miembro-avatar-icon">${inicial}</div>
+          <div class="miembro-avatar-icon">${escapeHtml(inicial)}</div>
           <div>
-            <div class="miembro-nombre-txt">${m} ${esYo ? '<small style="color:#6366f1; font-weight:800;">(Tú)</small>' : ''}</div>
+            <div class="miembro-nombre-txt">${escapeHtml(m)} ${esYo ? '<small style="color:#6366f1; font-weight:800;">(Tú)</small>' : ''}</div>
             <div class="miembro-tags-row">
               <span class="${esCreador ? 'badge-rol-admin' : 'badge-rol-miembro'}">${esCreador ? '👑 Creador / Admin' : '👤 Miembro'}</span>
             </div>
@@ -1589,10 +1337,8 @@ async function crearYAnadirNuevoMiembroAGrupoActivo() {
   }
 
   const nombre = (inputNuevoNombreMiembro?.value || '').trim();
-  const pin = (inputNuevoPinMiembro?.value || '').trim() || '0000';
 
   if (!nombre) return alert('Por favor, escribe el nombre de la persona a invitar.');
-  if (pin.length !== 4 || isNaN(pin)) return alert('El PIN debe tener 4 dígitos numéricos.');
 
   if (!Array.isArray(grupo.miembros)) grupo.miembros = [];
   if (grupo.miembros.some(m => m.toLowerCase() === nombre.toLowerCase())) {
@@ -1601,10 +1347,10 @@ async function crearYAnadirNuevoMiembroAGrupoActivo() {
 
   // Si la persona no existe en la app, la creamos en listaPerfiles y Supabase
   if (!usuarios.some(u => u.toLowerCase() === nombre.toLowerCase())) {
-    listaPerfiles.push({ id: nombre, nombre, pin, rol: 'usuario' });
+    listaPerfiles.push({ id: nombre, nombre, rol: 'usuario' });
     guardarPerfilesLocales();
     try {
-      await supabaseApp.from('perfiles').insert({ nombre, pin, rol: 'usuario' });
+      await supabaseApp.from('perfiles').insert({ nombre, rol: 'usuario' });
     } catch (e) {}
   }
 
@@ -1613,7 +1359,6 @@ async function crearYAnadirNuevoMiembroAGrupoActivo() {
   await sincronizarGrupoEnSupabase(grupo);
 
   if (inputNuevoNombreMiembro) inputNuevoNombreMiembro.value = '';
-  if (inputNuevoPinMiembro) inputNuevoPinMiembro.value = '';
 
   renderizarSelectorGrupos();
   renderizarPanelGestionGrupoActivo();
@@ -1929,15 +1674,15 @@ function renderizarPanelGrupos() {
     const info = document.createElement('div');
     info.className = 'user-card-info';
     info.innerHTML = `
-      <div class="user-avatar-initial" style="background: transparent; font-size: 1.5rem;">${g.icono || '👥'}</div>
-      <div class="user-name-text">${g.nombre} <small style="color:#64748b;">(${g.miembros?.length || 0} miembros)</small></div>
+      <div class="user-avatar-initial" style="background: transparent; font-size: 1.5rem;">${escapeHtml(g.icono || '👥')}</div>
+      <div class="user-name-text">${escapeHtml(g.nombre)} <small style="color:#64748b;">(${g.miembros?.length || 0} miembros)</small></div>
     `;
 
     const controls = document.createElement('div');
     controls.className = 'user-card-controls';
 
     const btnVer = document.createElement('button');
-    btnVer.className = 'btn-guardar-pin-mini';
+    btnVer.className = 'btn-accion-mini btn-guardar-pin-mini';
     btnVer.textContent = 'Ver grupo';
     btnVer.addEventListener('click', () => {
       cambiarGrupo(g.nombre);
@@ -2048,7 +1793,7 @@ async function guardarTurnoNube(dia, indiceEstado, mesAnioEspecifico = null) {
   if (idx >= 0) {
     turnosLocales[idx].indiceEstado = indiceEstado;
   } else {
-    turnosLocales.push({ dia, usuario: miUsuario, indiceEstado, mes_anio: mesAnio, grupo: grupoActivo });
+    turnosLocales.push({ dia, usuario: miUsuario, indiceEstado, mes_anio: mesAnio });
   }
   localStorage.setItem(keyLocal, JSON.stringify(turnosLocales));
 
@@ -2063,22 +1808,13 @@ async function guardarTurnoNube(dia, indiceEstado, mesAnioEspecifico = null) {
     if (existentes && existentes.length > 0) {
       await supabaseApp.from('Turnos').update({ indiceEstado: indiceEstado }).eq('id', existentes[0].id);
     } else {
-      let insRes = await supabaseApp.from('Turnos').insert({
+      await supabaseApp.from('Turnos').insert({
         dia: dia,
         usuario: miUsuario,
+        usuario_id: miUserId,
         indiceEstado: indiceEstado,
-        mes_anio: mesAnio,
-        grupo: grupoActivo
+        mes_anio: mesAnio
       });
-      // Fallback si la columna grupo no existe en la tabla de Supabase
-      if (insRes.error && insRes.error.message && insRes.error.message.includes('grupo')) {
-        await supabaseApp.from('Turnos').insert({
-          dia: dia,
-          usuario: miUsuario,
-          indiceEstado: indiceEstado,
-          mes_anio: mesAnio
-        });
-      }
     }
   } catch (e) {
     console.warn('Aviso guardando turno en Supabase:', e);
@@ -2107,7 +1843,7 @@ async function verificarPermisoCalendario(targetUsuario) {
 async function obtenerTurnosMesNube() {
   const mesAnio = `${fechaNavegacion.getFullYear()}-${fechaNavegacion.getMonth()}`;
   const esPropio = (miUsuario.toLowerCase() === (usuarioLogueado || '').toLowerCase());
-  const keyLocal = `kedadas_turnos_${grupoActivo}_${miUsuario}_${mesAnio}`;
+  const keyLocal = `kedadas_turnos_${miUsuario}_${mesAnio}`;
   
   // 1. REGLA ESTRICTA DE PRIVACIDAD: Si estamos consultando a otra persona, verificar permiso
   if (!esPropio) {
@@ -2130,15 +1866,7 @@ async function obtenerTurnosMesNube() {
     let res = await supabaseApp.from('Turnos')
       .select('*')
       .eq('usuario', miUsuario)
-      .eq('mes_anio', mesAnio)
-      .eq('grupo', grupoActivo);
-
-    if (res.error && res.error.message && res.error.message.includes('grupo')) {
-      res = await supabaseApp.from('Turnos')
-        .select('*')
-        .eq('usuario', miUsuario)
-        .eq('mes_anio', mesAnio);
-    }
+      .eq('mes_anio', mesAnio);
 
     if (!res.error && res.data) {
       // Si RLS devolvió un array vacío para otra persona, significa que no hay datos accesibles
@@ -2168,7 +1896,7 @@ async function obtenerTurnosMesNube() {
 async function obtenerTurnosAnoNube() {
   const anioPrefix = `${fechaNavegacion.getFullYear()}-`;
   const esPropio = (miUsuario.toLowerCase() === (usuarioLogueado || '').toLowerCase());
-  const keyLocal = `kedadas_turnos_ano_${grupoActivo}_${miUsuario}_${fechaNavegacion.getFullYear()}`;
+  const keyLocal = `kedadas_turnos_ano_${miUsuario}_${fechaNavegacion.getFullYear()}`;
 
   if (!esPropio) {
     const perm = await verificarPermisoCalendario(miUsuario);
@@ -2189,15 +1917,7 @@ async function obtenerTurnosAnoNube() {
     let res = await supabaseApp.from('Turnos')
       .select('*')
       .eq('usuario', miUsuario)
-      .like('mes_anio', `${anioPrefix}%`)
-      .eq('grupo', grupoActivo);
-
-    if (res.error && res.error.message && res.error.message.includes('grupo')) {
-      res = await supabaseApp.from('Turnos')
-        .select('*')
-        .eq('usuario', miUsuario)
-        .like('mes_anio', `${anioPrefix}%`);
-    }
+      .like('mes_anio', `${anioPrefix}%`);
 
     if (!res.error && res.data) {
       if (!esPropio && res.data.length === 0) {
@@ -2321,9 +2041,9 @@ async function renderizarMes() {
       <div class="bloqueo-privacidad-calendario">
         <div class="icono-candado">🔒</div>
         <h3>Calendario Privado</h3>
-        <p>No tienes autorización para ver el calendario de <strong>${miUsuario}</strong>.</p>
-        <span class="subtexto-privacidad">Por políticas de seguridad y privacidad (RLS), ${miUsuario} debe otorgarte permiso explícito para que puedas ver sus turnos de trabajo.</span>
-        <button type="button" id="btn-volver-mi-cal" style="padding: 10px 18px; border-radius: 12px; cursor: pointer; font-weight: 700; background: linear-gradient(135deg, #4f46e5, #6366f1); color: #fff; border: none; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);">👤 Volver a mi calendario (${usuarioLogueado || 'Mi usuario'})</button>
+        <p>No tienes autorización para ver el calendario de <strong>${escapeHtml(miUsuario)}</strong>.</p>
+        <span class="subtexto-privacidad">Por políticas de seguridad y privacidad (RLS), ${escapeHtml(miUsuario)} debe otorgarte permiso explícito para que puedas ver sus turnos de trabajo.</span>
+        <button type="button" id="btn-volver-mi-cal" style="padding: 10px 18px; border-radius: 12px; cursor: pointer; font-weight: 700; background: linear-gradient(135deg, #4f46e5, #6366f1); color: #fff; border: none; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);">👤 Volver a mi calendario (${escapeHtml(usuarioLogueado || 'Mi usuario')})</button>
       </div>
     `;
     const btnVolver = document.getElementById('btn-volver-mi-cal');
@@ -2389,8 +2109,8 @@ async function renderizarAno() {
       <div class="bloqueo-privacidad-calendario" style="margin: 30px auto; max-width: 500px;">
         <div class="icono-candado">🔒</div>
         <h3>Calendario Anual Privado</h3>
-        <p>No tienes autorización para ver el calendario anual de <strong>${miUsuario}</strong>.</p>
-        <span class="subtexto-privacidad">Por políticas de seguridad (RLS), necesitas permiso explícito de ${miUsuario} para consultar su cuadrante.</span>
+        <p>No tienes autorización para ver el calendario anual de <strong>${escapeHtml(miUsuario)}</strong>.</p>
+        <span class="subtexto-privacidad">Por políticas de seguridad (RLS), necesitas permiso explícito de ${escapeHtml(miUsuario)} para consultar su cuadrante.</span>
         <button type="button" id="btn-volver-mi-cal-ano" style="padding: 10px 18px; border-radius: 12px; cursor: pointer; font-weight: 700; background: linear-gradient(135deg, #4f46e5, #6366f1); color: #fff; border: none; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);">👤 Volver a mi calendario</button>
       </div>
     `;
@@ -2475,62 +2195,87 @@ btnCoincidencias.addEventListener('click', async () => {
     return;
   }
 
-  const mesAnio = `${fechaNavegacion.getFullYear()}-${fechaNavegacion.getMonth()}`;
-  let data = [];
+  const anio = fechaNavegacion.getFullYear();
+  const mesIndex = fechaNavegacion.getMonth();
+  const diasEnElMes = new Date(anio, mesIndex + 1, 0).getDate();
+  const startDate = `${anio}-${String(mesIndex + 1).padStart(2, '0')}-01`;
+  const endDate = `${anio}-${String(mesIndex + 1).padStart(2, '0')}-${String(diasEnElMes).padStart(2, '0')}`;
 
-  // Buscar turnos en almacenamiento local y Supabase
+  let diasComunes = [];
+
+  // 1. Coincidencias seguras mediante RPC get_group_free_matches (Zero-Knowledge)
   try {
-    let query = supabaseApp.from('Turnos')
-      .select('*')
-      .eq('indiceEstado', 1) // Estado 1 = 'libre' (L)
-      .eq('mes_anio', mesAnio)
-      .in('usuario', seleccionados)
-      .eq('grupo', grupoActivo);
+    const { data: rpcMatches, error: rpcErr } = await supabaseApp.rpc('get_group_free_matches', {
+      p_group_name: grupoActivo,
+      p_start_date: startDate,
+      p_end_date: endDate
+    });
 
-    let res = await query;
-    if (res.error && res.error.message && res.error.message.includes('grupo')) {
-      res = await supabaseApp.from('Turnos')
+    if (!rpcErr && Array.isArray(rpcMatches) && rpcMatches.length > 0) {
+      rpcMatches.forEach(match => {
+        const freeNames = (match.free_member_names || []).map(n => n.toLowerCase());
+        const todosLibres = seleccionados.every(sel => freeNames.includes(sel.toLowerCase()));
+        if (todosLibres) {
+          const diaNum = parseInt(match.match_date.split('-')[2], 10);
+          if (!isNaN(diaNum) && !diasComunes.includes(diaNum)) {
+            diasComunes.push(diaNum);
+          }
+        }
+      });
+    }
+  } catch (errRpc) {
+    console.warn('Aviso RPC get_group_free_matches:', errRpc);
+  }
+
+  // 2. Si RPC no encontró datos o trabajamos localmente, fallback con tabla Turnos y almacenamiento local
+  if (diasComunes.length === 0) {
+    const mesAnio = `${anio}-${mesIndex}`;
+    let data = [];
+
+    try {
+      let res = await supabaseApp.from('Turnos')
         .select('*')
-        .eq('indiceEstado', 1)
+        .eq('indiceEstado', 1) // Estado 1 = 'libre' (L)
         .eq('mes_anio', mesAnio)
         .in('usuario', seleccionados);
-    }
-    if (!res.error && res.data) data = res.data;
-  } catch(e) {}
 
-  // Complementar con datos locales de cada usuario seleccionado
-  seleccionados.forEach(user => {
-    const keyLocal = `kedadas_turnos_${grupoActivo}_${user}_${mesAnio}`;
-    try {
-      const raw = localStorage.getItem(keyLocal);
-      if (raw) {
-        const turnosLoc = JSON.parse(raw);
-        turnosLoc.filter(t => t.indiceEstado === 1).forEach(t => {
-          if (!data.some(d => d.dia === t.dia && d.usuario === user)) {
-            data.push(t);
-          }
-        });
-      }
+      if (!res.error && res.data) data = res.data;
     } catch(e) {}
-  });
 
-  const conteo = {};
-  data.forEach(t => {
-    if (!conteo[t.dia]) conteo[t.dia] = new Set();
-    conteo[t.dia].add(t.usuario);
-  });
+    // Complementar con datos locales de cada usuario seleccionado
+    seleccionados.forEach(user => {
+      const keyLocal = `kedadas_turnos_${user}_${mesAnio}`;
+      try {
+        const raw = localStorage.getItem(keyLocal);
+        if (raw) {
+          const turnosLoc = JSON.parse(raw);
+          turnosLoc.filter(t => t.indiceEstado === 1).forEach(t => {
+            if (!data.some(d => d.dia === t.dia && d.usuario === user)) {
+              data.push(t);
+            }
+          });
+        }
+      } catch(e) {}
+    });
 
-  const diasComunes = [];
-  const diasEnElMes = new Date(fechaNavegacion.getFullYear(), fechaNavegacion.getMonth() + 1, 0).getDate();
-  for (let dia = 1; dia <= diasEnElMes; dia++) {
-    if (conteo[dia] && conteo[dia].size === seleccionados.length) {
-      diasComunes.push(dia);
+    const conteo = {};
+    data.forEach(t => {
+      if (!conteo[t.dia]) conteo[t.dia] = new Set();
+      conteo[t.dia].add(t.usuario);
+    });
+
+    for (let dia = 1; dia <= diasEnElMes; dia++) {
+      if (conteo[dia] && conteo[dia].size === seleccionados.length) {
+        diasComunes.push(dia);
+      }
     }
   }
 
+  diasComunes.sort((a, b) => a - b);
+
   const nombresGrupo = seleccionados.join(', ');
   if (diasComunes.length === 0) {
-    resultadoCoincidencias.innerHTML = `😅 <strong>No hay coincidencias de días libres.</strong><br>Ningún día libráis todos a la vez (<strong>${nombresGrupo}</strong>) este mes en el grupo <strong>${grupoActivo}</strong>.`;
+    resultadoCoincidencias.innerHTML = `😅 <strong>No hay coincidencias de días libres.</strong><br>Ningún día libráis todos a la vez (<strong>${escapeHtml(nombresGrupo)}</strong>) este mes en el grupo <strong>${escapeHtml(grupoActivo)}</strong>.`;
   } else {
     // Análisis inteligente de universitarios y lugar de quedada
     const univsSeleccionados = seleccionados
@@ -2551,7 +2296,7 @@ btnCoincidencias.addEventListener('click', async () => {
       if (univsFuera.length > 0) {
         const ciudadDestino = univsFuera[0].ciudad_universidad || 'la Universidad';
         lugarRecomendado = `🎓 En ${ciudadDestino}`;
-        descripcionLugar = `🎒 <strong>¡Escapada Universitaria!</strong><br>Los miembros en origen (<strong>${miembrosOrigen.join(', ')}</strong>) podéis viajar a visitar a <strong>${univsFuera.map(p => p.nombre).join(', ')}</strong> en <strong>${ciudadDestino}</strong> para celebrar la quedada en su zona universitaria.`;
+        descripcionLugar = `🎒 <strong>¡Escapada Universitaria!</strong><br>Los miembros en origen (<strong>${escapeHtml(miembrosOrigen.join(', '))}</strong>) podéis viajar a visitar a <strong>${escapeHtml(univsFuera.map(p => p.nombre).join(', '))}</strong> en <strong>${escapeHtml(ciudadDestino)}</strong> para celebrar la quedada en su zona universitaria.`;
         planTituloSugerido = `🎒 Escapada universitaria a ${ciudadDestino} (Día ${diasComunes[0]})`;
       } else {
         lugarRecomendado = `🏠 En Ciudad de Origen`;
@@ -2563,7 +2308,7 @@ btnCoincidencias.addEventListener('click', async () => {
       if (univsFuera.length === 0) {
         descripcionLugar = `✅ <strong>¡Pleno en casa!</strong><br>Todos los miembros seleccionados residen o se encuentran en su ciudad de origen. No hay desplazamientos largos necesarios.`;
       } else {
-        descripcionLugar = `🚗 <strong>Quedada en Ciudad de Origen:</strong><br>Los universitarios que están fuera (<strong>${univsFuera.map(p => `${p.nombre} en ${p.ciudad_universidad || 'Campus'}`).join(', ')}</strong>) tendrían que bajar a su ciudad de origen para reuniros todos en estas fechas.`;
+        descripcionLugar = `🚗 <strong>Quedada en Ciudad de Origen:</strong><br>Los universitarios que están fuera (<strong>${escapeHtml(univsFuera.map(p => `${p.nombre} en ${p.ciudad_universidad || 'Campus'}`).join(', '))}</strong>) tendrían que bajar a su ciudad de origen para reuniros todos en estas fechas.`;
       }
       planTituloSugerido = `🍻 Kedada en Ciudad de Origen (Día ${diasComunes[0]})`;
     } else {
@@ -2575,17 +2320,17 @@ btnCoincidencias.addEventListener('click', async () => {
       } else {
         const ciudadDestino = univsFuera[0].ciudad_universidad || 'la Universidad';
         lugarRecomendado = `⚖️ Origen o Visita a ${ciudadDestino}`;
-        descripcionLugar = `Hay miembros en origen (<strong>${miembrosOrigen.join(', ')}</strong>) y miembros estudiando fuera (<strong>${univsFuera.map(p => `${p.nombre} en ${p.ciudad_universidad || 'Campus'}`).join(', ')}</strong>).<br>Podéis acordar si bajan a origen o si el grupo sube a ${ciudadDestino} a pasar el día.`;
+        descripcionLugar = `Hay miembros en origen (<strong>${escapeHtml(miembrosOrigen.join(', '))}</strong>) y miembros estudiando fuera (<strong>${escapeHtml(univsFuera.map(p => `${p.nombre} en ${p.ciudad_universidad || 'Campus'}`).join(', '))}</strong>).<br>Podéis acordar si bajan a origen o si el grupo sube a ${escapeHtml(ciudadDestino)} a pasar el día.`;
         planTituloSugerido = `🎯 Votar: ¿Quedar en Origen o ir a ${ciudadDestino}?`;
       }
     }
 
     resultadoCoincidencias.innerHTML = `
       <div style="font-size: 1.05rem; font-weight: 800; color: #065f46; margin-bottom: 6px;">
-        🎉 ¡Días libres en común en ${grupoActivo}!
+        🎉 ¡Días libres en común en ${escapeHtml(grupoActivo)}!
       </div>
       <div style="font-size: 0.92rem; color: #1e293b; margin-bottom: 8px;">
-        Coincidís libres (<strong>${nombresGrupo}</strong>) los días: 
+        Coincidís libres (<strong>${escapeHtml(nombresGrupo)}</strong>) los días: 
         <strong style="font-size: 1.12rem; color: #4f46e5;">${diasComunes.join(', ')}</strong> de ${nombresMeses[fechaNavegacion.getMonth()]}
       </div>
       
@@ -2593,7 +2338,7 @@ btnCoincidencias.addEventListener('click', async () => {
       <div class="recom-quedada-box">
         <div class="recom-quedada-header">
           <span class="recom-quedada-title">📍 Punto de Encuentro Recomendado</span>
-          <span class="recom-quedada-lugar-badge">${lugarRecomendado}</span>
+          <span class="recom-quedada-lugar-badge">${escapeHtml(lugarRecomendado)}</span>
         </div>
         <div class="recom-quedada-desc">${descripcionLugar}</div>
         <button type="button" class="btn-proponer-plan-kdd" onclick="proponerPlanDesdeCoincidencia('${planTituloSugerido.replace(/'/g, "\\'")}')">
@@ -2918,14 +2663,14 @@ function pintarPlanesEnPantalla() {
     
     div.innerHTML = `
       <div class="opcion-header-row">
-        <span class="opcion-texto">${item.opcion}</span>
+        <span class="opcion-texto">${escapeHtml(item.opcion)}</span>
         <div class="plan-acciones-btns">
           <button type="button" class="btn-accion-plan btn-editar-plan" title="Editar plan">✏️</button>
           <button type="button" class="btn-accion-plan btn-borrar-plan" title="Eliminar plan">🗑️</button>
         </div>
       </div>
       <div class="opcion-bar">
-        <span class="votantes-lista">${numVotos > 0 ? votantes.join(', ') : 'Sin votos aún (toca para votar)'}</span>
+        <span class="votantes-lista">${numVotos > 0 ? votantes.map(v => escapeHtml(v)).join(', ') : 'Sin votos aún (toca para votar)'}</span>
         <span class="voto-badge">${numVotos} ${numVotos === 1 ? 'voto' : 'votos'}</span>
       </div>
     `;
@@ -3177,12 +2922,12 @@ function pintarMensaje(msg) {
   div.innerHTML = `
     <div class="mensaje-contenido">
       <div style="display: flex; justify-content: space-between; gap: 8px; font-size: 0.75rem; margin-bottom: 2px; opacity: 0.85;">
-        <strong>${esMio ? 'Tú' : msg.usuario}</strong>
-        ${horaDisplay ? `<span>${horaDisplay}</span>` : ''}
+        <strong>${esMio ? 'Tú' : escapeHtml(msg.usuario)}</strong>
+        ${horaDisplay ? `<span>${escapeHtml(horaDisplay)}</span>` : ''}
       </div>
-      <div>${msg.texto}</div>
+      <div>${escapeHtml(msg.texto)}</div>
     </div>
-    <button class="btn-borrar-msg" title="Borrar mensaje" data-id="${msg.id}">🗑️</button>
+    <button class="btn-borrar-msg" title="Borrar mensaje" data-id="${escapeHtml(msg.id)}">🗑️</button>
   `;
 
   const btnBorrar = div.querySelector('.btn-borrar-msg');
@@ -3347,6 +3092,73 @@ if ('serviceWorker' in navigator) {
   });
 }
 
+const VAPID_PUBLIC_KEY = 'BPFV66ewMSEPBptLh0be-rpRSnEc01H4_HoFHxglPYyCb6Bequ7WFeqUhqMzMcB7PBninBqx4gBbrEyq1R1jxvI';
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding)
+    .replace(/\-/g, '+')
+    .replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+async function suscribirWebPushDispositivo() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return null;
+
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+      });
+    }
+
+    if (sub) {
+      const subJson = sub.toJSON();
+      const p256dh = subJson.keys?.p256dh;
+      const auth = subJson.keys?.auth;
+
+      if (miUserId && p256dh && auth) {
+        await supabaseApp.from('push_subscriptions').upsert({
+          user_id: miUserId,
+          endpoint: sub.endpoint,
+          p256dh: p256dh,
+          auth: auth
+        }, { onConflict: 'endpoint' });
+      }
+
+      return sub;
+    }
+  } catch (err) {
+    console.warn('Aviso suscribiendo a Web Push:', err);
+  }
+  return null;
+}
+
+async function enviarAvisoPushServidor(titulo, mensaje, url = '/') {
+  try {
+    await fetch('/api/send-push', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: titulo,
+        body: mensaje,
+        url: url
+      })
+    });
+  } catch(e) {
+    console.warn('Aviso enviando push al servidor:', e);
+  }
+}
+
 async function inicializarPushNotifications() {
   if (!('Notification' in window)) return;
 
@@ -3354,6 +3166,7 @@ async function inicializarPushNotifications() {
     if (Notification.permission === 'granted') {
       btnNotificaciones.textContent = '🔔 Avisos Activos';
       btnNotificaciones.classList.add('activo');
+      suscribirWebPushDispositivo();
     }
 
     btnNotificaciones.addEventListener('click', async () => {
@@ -3361,14 +3174,17 @@ async function inicializarPushNotifications() {
         const permission = await Notification.requestPermission();
         if (permission === 'granted') {
           btnNotificaciones.textContent = '🔔 Avisos Activos';
-          alert('🎉 ¡Notificaciones activadas! Te avisaremos cuando haya coincidencias de días libres con tus amigos.');
-          
-          if (swRegistration) {
-            swRegistration.showNotification('Kedadas', {
-              body: '¡Notificaciones activadas correctamente en tu dispositivo!',
-              icon: 'icono.png',
-              badge: 'icono.png'
-            });
+          btnNotificaciones.classList.add('activo');
+
+          const sub = await suscribirWebPushDispositivo();
+          if (sub) {
+            alert('🎉 ¡Notificaciones Web Push activadas! Tu dispositivo ha sido registrado para avisarte al instante de coincidencias y planes.');
+            await enviarAvisoPushServidor(
+              'Kedadas',
+              `🔔 ¡Notificaciones activadas con éxito para ${usuarioLogueado || 'tu cuenta'}!`
+            );
+          } else {
+            alert('🎉 ¡Notificaciones activadas en el navegador!');
           }
         } else {
           alert('Para recibir alertas de días libres, necesitas permitir las notificaciones en los ajustes de tu navegador o iPhone.');
@@ -3916,7 +3732,7 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO NI MARKDOWN):
   throw new Error(ultimoError || 'No se pudo contactar con los modelos de Gemini Vision.');
 }
 
-// Analizar la foto o archivo con IA y rellenar automáticamente el calendario
+// Analizar la foto o archivo con IA y rellenar automáticamente el calendario vía función serverless
 if (btnAnalizarFoto) {
   btnAnalizarFoto.addEventListener('click', async () => {
     if (!imagenBase64Actual) {
@@ -3930,104 +3746,52 @@ if (btnAnalizarFoto) {
 
     let claveGeminiLocal = (localStorage.getItem(STORAGE_GEMINI_KEY) || '').trim();
 
-    // Si no hay clave, solicitarla amistosamente para no bloquear el flujo
-    if (!claveGeminiLocal) {
-      if (boxConfigIA) boxConfigIA.style.display = 'block';
-      const claveEntrada = prompt('🔑 Para digitalizar cuadrantes con IA introduce tu clave de Google Gemini (puedes conseguir una gratis en 30 segundos en Google AI Studio con tu cuenta de Google):\n\nVisita: aistudio.google.com/app/apikey', '');
-      if (claveEntrada && claveEntrada.trim()) {
-        claveGeminiLocal = claveEntrada.trim();
-        localStorage.setItem(STORAGE_GEMINI_KEY, claveGeminiLocal);
-        actualizarEstadoClaveGemini();
-      }
-    }
-
     btnAnalizarFoto.style.display = 'none';
     scanLoadingState.style.display = 'block';
     scanStatusText.textContent = 'Analizando cuadrante con IA de Visión...';
-    scanStatusSub.textContent = 'Conectando con Google Gemini Vision...';
+    scanStatusSub.textContent = 'Enviando cuadrante a la función serverless...';
 
     let resultado = null;
     let ultimoErrorDetalle = '';
 
-    // NIVEL 1: Si hay clave local en el navegador, llamar directamente a Gemini API
-    if (claveGeminiLocal) {
-      try {
-        scanStatusSub.textContent = `Extrayendo turnos para ${usuarioObjetivo} con Gemini Vision...`;
-        resultado = await llamarGeminiVisionNavegador(
-          claveGeminiLocal,
-          imagenBase64Actual,
-          mimeTypeActual,
-          modoSeleccionado,
-          usuarioObjetivo,
-          mesSeleccionado,
-          anoSeleccionado
-        );
-      } catch (errDirect) {
-        console.warn('Fallo llamada directa a Gemini con clave local:', errDirect);
-        ultimoErrorDetalle = errDirect.message || 'Error en Gemini Vision';
-      }
-    }
+    // LLAMADA EXCLUSIVA A LA FUNCIÓN SERVERLESS (/api/analizar-cuadrante)
+    try {
+      scanStatusSub.textContent = `Extrayendo turnos para ${usuarioObjetivo} con Gemini Vision...`;
+      const resServidor = await fetch('/api/analizar-cuadrante', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageBase64: imagenBase64Actual,
+          mimeType: mimeTypeActual,
+          mes: mesSeleccionado,
+          anio: anoSeleccionado,
+          usuario: usuarioObjetivo,
+          modoEscaneo: modoSeleccionado,
+          apiKey: claveGeminiLocal || undefined
+        })
+      });
 
-    // NIVEL 2: Intentar endpoint de servidor Vercel /api/analizar-cuadrante
-    if (!resultado) {
-      try {
-        scanStatusSub.textContent = 'Consultando servicio de cuadrantes en la nube...';
-        const resServidor = await fetch('./api/analizar-cuadrante', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            imageBase64: imagenBase64Actual,
-            mimeType: mimeTypeActual,
-            mes: mesSeleccionado,
-            anio: anoSeleccionado,
-            usuario: usuarioObjetivo,
-            modoEscaneo: modoSeleccionado,
-            apiKey: claveGeminiLocal || undefined
-          })
-        });
-
-        if (resServidor.ok) {
-          const dataServ = await resServidor.json();
-          if (dataServ && Array.isArray(dataServ.meses) && dataServ.meses.length > 0) {
-            resultado = dataServ;
-          }
+      if (resServidor.ok) {
+        const dataServ = await resServidor.json();
+        if (dataServ && Array.isArray(dataServ.meses) && dataServ.meses.length > 0) {
+          resultado = dataServ;
         } else {
-          try {
-            const errServJson = await resServidor.json();
-            if (errServJson.message || errServJson.error) {
-              ultimoErrorDetalle = errServJson.message || errServJson.error;
-            }
-          } catch(e) {}
+          ultimoErrorDetalle = 'El modelo no devolvió ningún mes con turnos.';
         }
-      } catch (errServ) {
-        console.warn('Fallo consulta a /api/analizar-cuadrante:', errServ);
-        if (!ultimoErrorDetalle) ultimoErrorDetalle = errServ.message;
+      } else {
+        const errJson = await resServidor.json().catch(() => ({}));
+        ultimoErrorDetalle = errJson.message || errJson.error || `Error ${resServidor.status}`;
       }
+    } catch (errServ) {
+      console.warn('Fallo consulta a /api/analizar-cuadrante:', errServ);
+      ultimoErrorDetalle = errServ.message;
     }
 
-    // NIVEL 3: Si no se pudo procesar
     if (!resultado) {
       scanLoadingState.style.display = 'none';
       btnAnalizarFoto.style.display = 'inline-block';
-
-      if (!claveGeminiLocal) {
-        if (boxConfigIA) boxConfigIA.style.display = 'block';
-        if (inputGeminiKey) inputGeminiKey.focus();
-        alert('ℹ️ Para digitalizar cuadrantes con IA necesitas una clave gratuita de Google Gemini.\n\nPulsa en "⚙️ Clave IA" arriba para guardarla (puedes crearla gratis en 30 segundos en Google AI Studio: aistudio.google.com/app/apikey).');
-        return;
-      } else {
-        const errorLower = (ultimoErrorDetalle || '').toLowerCase();
-        if (errorLower.includes('api_key_invalid') || errorLower.includes('api key not valid') || errorLower.includes('invalid api key')) {
-          if (boxConfigIA) boxConfigIA.style.display = 'block';
-          if (inputGeminiKey) inputGeminiKey.focus();
-          alert(`❌ La clave de Gemini guardada no es válida.\n\nMotivo de Google:\n${ultimoErrorDetalle}\n\nPor favor, abre "⚙️ Clave IA" arriba y pega tu clave correcta de aistudio.google.com/app/apikey.`);
-        } else if (errorLower.includes('resource_exhausted') || errorLower.includes('quota')) {
-          alert(`⏳ Límite de consultas gratuitas de Gemini alcanzado.\n\nGoogle AI Studio permite 15 consultas por minuto en la capa gratuita. Espera 1 minuto y vuelve a pulsar "Generar horario".`);
-        } else {
-          alert(`❌ No se pudo analizar el cuadrante.\n\nDetalle del error:\n${ultimoErrorDetalle || 'Comprueba la legibilidad de la imagen y la clave de Gemini.'}\n\nConsejo: Si la clave tiene algún error o no estás seguro, pulsa "⚙️ Clave IA" arriba para revisarla o pulsar el botón "🧪 Probar".`);
-        }
-        return;
-      }
+      alert(`❌ No se pudo analizar el cuadrante en el servidor:\n${ultimoErrorDetalle || 'Comprueba la legibilidad de la imagen o configura GEMINI_API_KEY en las variables de Vercel.'}`);
+      return;
     }
 
     // Análisis exitoso: normalizar turnos
@@ -4058,7 +3822,7 @@ async function aplicarTurnosDetectadosAlCalendario(resultadoScan, usuarioDestino
   // 1. Guardar de inmediato en LocalStorage para cada mes detectado (sincrónico, cero esperas)
   for (const mesObj of meses) {
     const mesAnioKey = `${anio}-${mesObj.mes}`;
-    const keyLocal = `kedadas_turnos_${grupoActivo}_${usuarioFinal}_${mesAnioKey}`;
+    const keyLocal = `kedadas_turnos_${usuarioFinal}_${mesAnioKey}`;
     let turnosLocales = [];
     try {
       const raw = localStorage.getItem(keyLocal);
@@ -4075,17 +3839,16 @@ async function aplicarTurnosDetectadosAlCalendario(resultadoScan, usuarioDestino
           dia: d.dia,
           usuario: usuarioFinal,
           indiceEstado: d.indiceEstado,
-          mes_anio: mesAnioKey,
-          grupo: grupoActivo
+          mes_anio: mesAnioKey
         });
       }
 
       filasParaSupabase.push({
         dia: d.dia,
         usuario: usuarioFinal,
+        usuario_id: miUserId,
         indiceEstado: d.indiceEstado,
-        mes_anio: mesAnioKey,
-        grupo: grupoActivo
+        mes_anio: mesAnioKey
       });
     });
 
@@ -4141,11 +3904,7 @@ async function guardarTurnosEnLote(filas) {
     const BLOQUE = 80;
     for (let i = 0; i < filas.length; i += BLOQUE) {
       const chunk = filas.slice(i, i + BLOQUE);
-      let res = await supabaseApp.from('Turnos').upsert(chunk, { onConflict: 'usuario,dia,mes_anio' });
-      if (res.error && res.error.message && res.error.message.includes('grupo')) {
-        const chunkSinGrupo = chunk.map(({ grupo, ...resto }) => resto);
-        await supabaseApp.from('Turnos').upsert(chunkSinGrupo, { onConflict: 'usuario,dia,mes_anio' });
-      }
+      await supabaseApp.from('Turnos').upsert(chunk, { onConflict: 'usuario,dia,mes_anio' });
     }
   } catch (err) {
     console.warn('Aviso sincronizando turnos en Supabase:', err);

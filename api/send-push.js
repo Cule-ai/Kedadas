@@ -1,0 +1,110 @@
+// Vercel Serverless Function: /api/send-push
+// Envía notificaciones Web Push reales a los dispositivos suscritos (VAPID)
+
+import webpush from 'web-push';
+import { createClient } from '@supabase/supabase-js';
+
+const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || 'BPFV66ewMSEPBptLh0be-rpRSnEc01H4_HoFHxglPYyCb6Bequ7WFeqUhqMzMcB7PBninBqx4gBbrEyq1R1jxvI';
+const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '_LZ0ZvNRbaDFzrLE-nuENUwrtRtP7KI2YlRtfCE9FGk';
+const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:maculecale@gmail.com';
+
+const SUPABASE_URL = process.env.SUPABASE_URL || 'https://idpgvtixeyytfgpkqjjm.supabase.co';
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || 'sb_publishable_S7NTo7XKekBigTm8U17rQA_u2Cp0SrI';
+
+webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+
+export default async function handler(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Método no permitido. Usa POST.' });
+  }
+
+  try {
+    const {
+      title = 'Kedadas',
+      body = '¡Nueva actividad o coincidencia en tu grupo!',
+      icon = '/icono-192.png',
+      url = '/',
+      subscription = null,
+      userId = null
+    } = req.body || {};
+
+    const payload = JSON.stringify({
+      title,
+      body,
+      icon,
+      data: { url }
+    });
+
+    // 1. Envío directo a una suscripción específica pasada en el body
+    if (subscription && subscription.endpoint) {
+      try {
+        await webpush.sendNotification(subscription, payload);
+        return res.status(200).json({ success: true, count: 1, message: 'Notificación enviada con éxito.' });
+      } catch (err) {
+        console.error('Error enviando notificación individual:', err);
+        return res.status(500).json({ error: err.message });
+      }
+    }
+
+    // 2. Envío a las suscripciones almacenadas en Supabase
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+    let query = supabase.from('push_subscriptions').select('*');
+    if (userId) {
+      query = query.eq('user_id', userId);
+    }
+
+    const { data: subs, error } = await query;
+    if (error) {
+      return res.status(500).json({ error: 'Error consultando push_subscriptions: ' + error.message });
+    }
+
+    if (!subs || subs.length === 0) {
+      return res.status(200).json({ success: true, count: 0, message: 'No hay dispositivos suscritos.' });
+    }
+
+    let enviados = 0;
+    const fallos = [];
+
+    await Promise.all(
+      subs.map(async (row) => {
+        const pushSubscription = {
+          endpoint: row.endpoint,
+          keys: {
+            p256dh: row.p256dh,
+            auth: row.auth
+          }
+        };
+
+        try {
+          await webpush.sendNotification(pushSubscription, payload);
+          enviados++;
+        } catch (pushErr) {
+          console.warn('Error al enviar a endpoint:', row.endpoint, pushErr.statusCode);
+          // Si el endpoint ha caducado (410 Gone o 404 Not Found), eliminarlo de la base de datos
+          if (pushErr.statusCode === 410 || pushErr.statusCode === 404) {
+            await supabase.from('push_subscriptions').delete().eq('id', row.id);
+          }
+          fallos.push({ endpoint: row.endpoint, error: pushErr.message });
+        }
+      })
+    );
+
+    return res.status(200).json({
+      success: true,
+      count: enviados,
+      total: subs.length,
+      fallos: fallos.length
+    });
+  } catch (err) {
+    console.error('Error general en send-push:', err);
+    return res.status(500).json({ error: err.message });
+  }
+}
