@@ -2569,6 +2569,37 @@ body.dark-theme .form-nuevo-grupo-row input {
   opacity: 0.7;
 }
 
+.top-user-switcher-wrap {
+  display: inline-flex;
+  align-items: center;
+}
+
+.selector-usuario-identidad-dropdown {
+  background: #f1f5f9;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: #1e293b;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.selector-usuario-identidad-dropdown:hover {
+  background: #ffffff;
+  border-color: #6366f1;
+  transform: translateY(-1px);
+}
+
+body.dark-theme .selector-usuario-identidad-dropdown {
+  background: #1e293b;
+  border-color: #475569;
+  color: #f1f5f9;
+}
+
 /* 2. BARRA DE PESTAÑAS (NAV TABS FIJA EN MÓVIL) */
 .app-nav-tabs {
   position: fixed;

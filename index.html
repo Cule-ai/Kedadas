@@ -76,10 +76,10 @@
           <span id="nombre-grupo-banner">🍻 Amigos</span>
           <span class="chip-arrow">▾</span>
         </button>
-        <!-- Chip de Usuario (Clic abre la pestaña Usuarios) -->
-        <button type="button" class="chip-top-nav chip-top-user" id="btn-top-user-pill" title="Ajustes de usuario">
-          <span id="badge-usuario-sesion">👤 Cule</span>
-        </button>
+        <!-- Selector Rápido de Usuario / Identidad Activa -->
+        <div class="top-user-switcher-wrap">
+          <select id="selector-usuario-identidad" class="selector-usuario-identidad-dropdown" title="Cambiar usuario activo"></select>
+        </div>
       </div>
     </header>
 
@@ -457,9 +457,9 @@
           </div>
         </div>
         <div class="perfil-acciones-grid">
+          <button id="btn-conmutar-a-cule" class="btn-chip-action" title="Cambiar a Cule (Administrador)" style="background: linear-gradient(135deg, #4f46e5, #6366f1); color: #fff; font-weight: 800;">👑 Conmutar a Cule (Admin)</button>
           <button id="btn-activar-passkey" class="btn-chip-action" title="Vincular Face ID / Touch ID">🔑 Vincular Face ID / Touch ID</button>
           <button id="btn-notificaciones" class="btn-chip-action" title="Activar avisos de coincidencias">🔔 Notificaciones</button>
-          <button type="button" id="btn-top-personas" class="btn-chip-action" style="display: none;">👥 Personas</button>
           <button id="btn-logout" class="btn-chip-action btn-danger-chip" title="Cerrar sesión">🚪 Cerrar Sesión</button>
         </div>
       </div>

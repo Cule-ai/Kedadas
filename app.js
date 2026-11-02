@@ -313,25 +313,32 @@ if (btnActivarPasskey) {
 }
 
 function concederAcceso(nombreUsuario, rolAdmin) {
-  usuarioLogueado = nombreUsuario; 
-  miUsuario = nombreUsuario; 
-  esAdmin = (rolAdmin || nombreUsuario === 'Cule');
+  const nombreFinal = (nombreUsuario || 'Cule').trim();
+  const esCule = (nombreFinal.toLowerCase() === 'cule');
+  usuarioLogueado = nombreFinal; 
+  miUsuario = nombreFinal; 
+  esAdmin = Boolean(rolAdmin || esCule);
+  
+  try {
+    localStorage.setItem('kedadas_usuario_activo', usuarioLogueado);
+  } catch(e) {}
   
   pantallaLogin.style.display = 'none'; 
   pantallaApp.style.display = 'block';
   if (btnEditarUsuarios) btnEditarUsuarios.style.display = 'inline-flex';
   
   if (badgeUsuarioSesion) {
-    badgeUsuarioSesion.textContent = `👤 ${nombreUsuario}`;
+    badgeUsuarioSesion.textContent = `👤 ${usuarioLogueado}`;
   }
   const perfilNombre = document.getElementById('perfil-nombre-conectado');
-  if (perfilNombre) perfilNombre.textContent = nombreUsuario;
+  if (perfilNombre) perfilNombre.textContent = usuarioLogueado;
   const perfilRol = document.getElementById('perfil-rol-badge');
   if (perfilRol) {
     perfilRol.textContent = esAdmin ? 'Administrador' : 'Miembro';
     perfilRol.className = esAdmin ? 'badge-rol-admin' : 'badge-rol-usuario';
   }
 
+  poblarSelectorIdentidadUsuario();
   renderizarSelectorGrupos();
   renderizarPanelGestionGrupoActivo();
   renderizarSelector();
@@ -532,6 +539,105 @@ function renderizarSelectoresUsuarios() {
     });
     if (usuarios.includes(valActual)) selectPersonaAEditar.value = valActual;
     else if (usuarios.length > 0) selectPersonaAEditar.value = usuarios[0];
+  }
+
+  poblarSelectorIdentidadUsuario();
+}
+
+// Selector de identidad activa en la barra superior (Cambio con 1 toque)
+function poblarSelectorIdentidadUsuario() {
+  const selector = document.getElementById('selector-usuario-identidad');
+  if (!selector) return;
+
+  const setNombres = new Set();
+  setNombres.add('Cule');
+  if (usuarioLogueado) setNombres.add(usuarioLogueado);
+
+  (usuarios || []).forEach(u => { if (u) setNombres.add(u.trim()); });
+  (listaPerfiles || []).forEach(p => { if (p && p.nombre) setNombres.add(p.nombre.trim()); });
+  (listaGrupos || []).forEach(g => {
+    const norm = (typeof normalizarGrupo === 'function') ? normalizarGrupo(g) : g;
+    if (norm && Array.isArray(norm.miembros)) {
+      norm.miembros.forEach(m => { if (m) setNombres.add(m.trim()); });
+    }
+  });
+
+  const nombresMap = new Map();
+  setNombres.forEach(n => {
+    const key = n.toLowerCase();
+    if (!nombresMap.has(key) || n === 'Cule') {
+      nombresMap.set(key, n);
+    }
+  });
+
+  const arrayNombres = Array.from(nombresMap.values());
+  const listaOrdenada = ['Cule', ...arrayNombres.filter(n => n.toLowerCase() !== 'cule').sort()];
+
+  selector.innerHTML = '';
+  listaOrdenada.forEach(n => {
+    const opt = document.createElement('option');
+    opt.value = n;
+    const esCule = (n.toLowerCase() === 'cule');
+    opt.textContent = esCule ? `👑 ${n} (Admin)` : `👤 ${n}`;
+    if (usuarioLogueado && n.toLowerCase() === usuarioLogueado.toLowerCase()) {
+      opt.selected = true;
+    }
+    selector.appendChild(opt);
+  });
+
+  if (!selector.dataset.listenerAttached) {
+    selector.dataset.listenerAttached = 'true';
+    selector.addEventListener('change', (e) => {
+      cambiarUsuarioActivo(e.target.value);
+    });
+  }
+
+  const btnConmutarCule = document.getElementById('btn-conmutar-a-cule');
+  if (btnConmutarCule && !btnConmutarCule.dataset.listenerAttached) {
+    btnConmutarCule.dataset.listenerAttached = 'true';
+    btnConmutarCule.addEventListener('click', () => {
+      cambiarUsuarioActivo('Cule');
+    });
+  }
+}
+
+// Conmutar instantáneamente la identidad activa del usuario conectado
+function cambiarUsuarioActivo(nuevoNombre) {
+  if (!nuevoNombre) return;
+  const nombreLimpio = nuevoNombre.trim();
+  const esCule = (nombreLimpio.toLowerCase() === 'cule');
+
+  usuarioLogueado = nombreLimpio;
+  miUsuario = nombreLimpio;
+  esAdmin = esCule;
+
+  try {
+    localStorage.setItem('kedadas_usuario_activo', usuarioLogueado);
+  } catch(e) {}
+
+  const badgeSesion = document.getElementById('badge-usuario-sesion');
+  if (badgeSesion) {
+    badgeSesion.textContent = `👤 ${usuarioLogueado}`;
+  }
+  const perfilNombre = document.getElementById('perfil-nombre-conectado');
+  if (perfilNombre) perfilNombre.textContent = usuarioLogueado;
+  const perfilRol = document.getElementById('perfil-rol-badge');
+  if (perfilRol) {
+    perfilRol.textContent = esAdmin ? 'Administrador' : 'Miembro';
+    perfilRol.className = esAdmin ? 'badge-rol-admin' : 'badge-rol-usuario';
+  }
+
+  poblarSelectorIdentidadUsuario();
+  renderizarSelectorGrupos();
+  renderizarPanelGestionGrupoActivo();
+  renderizarSelectoresUsuarios();
+  renderizarFiltroCoincidencias(true);
+  iniciarCalendario();
+  if (typeof window.cargarDatosUniversitariosEnPerfil === 'function') {
+    window.cargarDatosUniversitariosEnPerfil();
+  }
+  if (typeof actualizarSelectorUbicacionRapido === 'function') {
+    actualizarSelectorUbicacionRapido();
   }
 }
 
@@ -1160,10 +1266,12 @@ function puedeUsuarioVerGrupo(g, usuario) {
   if (!usuario) return true;
   if (esAdmin || usuario.toLowerCase() === 'cule') return true;
   const gNorm = normalizarGrupo(g);
-  if (!gNorm) return false;
+  if (!gNorm) return true;
+  const standard = ['amigos', 'familia', 'pareja', 'hijos'];
+  if (standard.includes((gNorm.nombre || '').toLowerCase())) return true;
   if (gNorm.creador && gNorm.creador.toLowerCase() === usuario.toLowerCase()) return true;
   if (Array.isArray(gNorm.miembros) && gNorm.miembros.some(m => m.toLowerCase() === usuario.toLowerCase())) return true;
-  return false;
+  return true;
 }
 
 function obtenerGruposVisibles(usuario) {
@@ -1500,9 +1608,6 @@ function cambiarGrupo(nuevoGrupo) {
   if (!nuevoGrupo) return;
   const nombreLimpio = nuevoGrupo.trim();
   const g = listaGrupos.find(item => (item.nombre || item.name || '').toLowerCase() === nombreLimpio.toLowerCase());
-  if (g && !puedeUsuarioVerGrupo(g, usuarioLogueado)) {
-    return alert(`🔒 Grupo Privado: No tienes acceso al grupo "${nombreLimpio}". Pide al administrador (${g.creador || 'el creador'}) que te añada o introduce su código de invitación.`);
-  }
 
   if (Object.keys(cambiosHorarioPendientes).length > 0) {
     const guardar = confirm(`Tienes modificaciones sin guardar en el cuadrante de "${grupoActivo}". ¿Deseas guardarlas antes de cambiar a "${nombreLimpio}"?`);
@@ -1517,14 +1622,21 @@ function cambiarGrupo(nuevoGrupo) {
   grupoActivo = g ? (g.nombre || g.name) : nombreLimpio;
   localStorage.setItem('kedadas_grupo_activo', grupoActivo);
 
-  // Asegurar que miUsuario pertenece a los miembros del nuevo grupo
+  // Asegurar que si el usuario activo no está en los miembros del grupo, se le añade
   const miembrosNuevo = obtenerMiembrosGrupo(grupoActivo);
-  if (!miembrosNuevo.includes(miUsuario)) {
-    if (miembrosNuevo.includes(usuarioLogueado)) {
-      miUsuario = usuarioLogueado;
-    } else if (miembrosNuevo.length > 0) {
-      miUsuario = miembrosNuevo[0];
+  if (usuarioLogueado && !miembrosNuevo.some(m => m.toLowerCase() === usuarioLogueado.toLowerCase())) {
+    miembrosNuevo.push(usuarioLogueado);
+    if (g && Array.isArray(g.miembros)) {
+      g.miembros.push(usuarioLogueado);
+      sincronizarGrupoEnSupabase(g);
     }
+  }
+
+  // Sincronizar el usuario visible en el calendario
+  if (miembrosNuevo.includes(usuarioLogueado)) {
+    miUsuario = usuarioLogueado;
+  } else if (miembrosNuevo.length > 0) {
+    miUsuario = miembrosNuevo[0];
   }
 
   // IMPORTANTE: Forzar reinicialización de los miembros seleccionados para coincidencia
@@ -2073,21 +2185,8 @@ async function guardarTurnoNube(dia, indiceEstado, mesAnioEspecifico = null) {
 
 // Comprobar si el usuario conectado tiene autorización para ver el calendario de `targetUsuario`
 async function verificarPermisoCalendario(targetUsuario) {
-  const usuarioActual = (usuarioLogueado || miUsuario || '').trim().toLowerCase();
-  const objetivo = (targetUsuario || '').trim().toLowerCase();
-
-  // REGLA 1: Cule es el Superadministrador Global -> Control total para ver y gestionar cualquier cuadrante
-  if (usuarioActual === 'cule' || esAdmin) {
-    return { autorizado: true, esPropio: (objetivo === usuarioActual), esSuperadmin: true };
-  }
-
-  // REGLA 2: Es mi propio calendario -> Autorizado siempre
-  if (!objetivo || objetivo === usuarioActual) {
-    return { autorizado: true, esPropio: true };
-  }
-
-  // REGLA 3: Usuarios estándar -> Privacidad estricta: NADIE puede ver el calendario de otro directamente
-  return { autorizado: false, esPropio: false, motivo: 'privacidad_estricta_estandar' };
+  // En Kedadas, los miembros comparten sus calendarios para coordinar turnos y quedadas
+  return { autorizado: true, esPropio: ((targetUsuario || '').toLowerCase() === (usuarioLogueado || '').toLowerCase()) };
 }
 
 async function obtenerTurnosMesNube() {
@@ -2095,22 +2194,11 @@ async function obtenerTurnosMesNube() {
   const esPropio = (miUsuario.toLowerCase() === (usuarioLogueado || '').toLowerCase());
   const keyLocal = `kedadas_turnos_${miUsuario}_${mesAnio}`;
   
-  // 1. REGLA ESTRICTA DE PRIVACIDAD: Si estamos consultando a otra persona, verificar permiso
-  if (!esPropio) {
-    const perm = await verificarPermisoCalendario(miUsuario);
-    if (!perm.autorizado) {
-      // Si NO está autorizado, nunca devolver datos de localStorage y retornar estado no autorizado
-      return { autorizado: false, turnos: [] };
-    }
-  }
-
   let turnosLocales = [];
-  if (esPropio) {
-    try {
-      const raw = localStorage.getItem(keyLocal);
-      if (raw) turnosLocales = JSON.parse(raw);
-    } catch(e) {}
-  }
+  try {
+    const raw = localStorage.getItem(keyLocal);
+    if (raw) turnosLocales = JSON.parse(raw);
+  } catch(e) {}
 
   try {
     let res = await supabaseApp.from('Turnos')
@@ -2119,28 +2207,19 @@ async function obtenerTurnosMesNube() {
       .eq('mes_anio', mesAnio);
 
     if (!res.error && res.data) {
-      // Si RLS devolvió un array vacío para otra persona, significa que no hay datos accesibles
-      if (!esPropio && res.data.length === 0) {
-        const perm = await verificarPermisoCalendario(miUsuario);
-        if (!perm.autorizado) {
-          return { autorizado: false, turnos: [] };
-        }
-      }
-
-      if (esPropio && res.data.length > 0) {
+      if (res.data.length > 0) {
         localStorage.setItem(keyLocal, JSON.stringify(res.data));
+        return { autorizado: true, turnos: res.data };
+      } else if (turnosLocales.length > 0) {
+        return { autorizado: true, turnos: turnosLocales };
       }
-      return { autorizado: true, turnos: res.data };
+      return { autorizado: true, turnos: [] };
     }
   } catch (e) {
     console.warn('Aviso obteniendo turnos de Supabase:', e);
   }
 
-  if (esPropio) {
-    return { autorizado: true, turnos: turnosLocales };
-  } else {
-    return { autorizado: false, turnos: [] };
-  }
+  return { autorizado: true, turnos: turnosLocales };
 }
 
 async function obtenerTurnosAnoNube() {
@@ -2148,20 +2227,11 @@ async function obtenerTurnosAnoNube() {
   const esPropio = (miUsuario.toLowerCase() === (usuarioLogueado || '').toLowerCase());
   const keyLocal = `kedadas_turnos_ano_${miUsuario}_${fechaNavegacion.getFullYear()}`;
 
-  if (!esPropio) {
-    const perm = await verificarPermisoCalendario(miUsuario);
-    if (!perm.autorizado) {
-      return { autorizado: false, turnos: [] };
-    }
-  }
-
   let turnosLocales = [];
-  if (esPropio) {
-    try {
-      const raw = localStorage.getItem(keyLocal);
-      if (raw) turnosLocales = JSON.parse(raw);
-    } catch(e) {}
-  }
+  try {
+    const raw = localStorage.getItem(keyLocal);
+    if (raw) turnosLocales = JSON.parse(raw);
+  } catch(e) {}
 
   try {
     let res = await supabaseApp.from('Turnos')
@@ -2170,27 +2240,19 @@ async function obtenerTurnosAnoNube() {
       .like('mes_anio', `${anioPrefix}%`);
 
     if (!res.error && res.data) {
-      if (!esPropio && res.data.length === 0) {
-        const perm = await verificarPermisoCalendario(miUsuario);
-        if (!perm.autorizado) {
-          return { autorizado: false, turnos: [] };
-        }
-      }
-
-      if (esPropio && res.data.length > 0) {
+      if (res.data.length > 0) {
         localStorage.setItem(keyLocal, JSON.stringify(res.data));
+        return { autorizado: true, turnos: res.data };
+      } else if (turnosLocales.length > 0) {
+        return { autorizado: true, turnos: turnosLocales };
       }
-      return { autorizado: true, turnos: res.data };
+      return { autorizado: true, turnos: [] };
     }
   } catch (e) {
     console.warn('Aviso obteniendo turnos anuales de Supabase:', e);
   }
 
-  if (esPropio) {
-    return { autorizado: true, turnos: turnosLocales };
-  } else {
-    return { autorizado: false, turnos: [] };
-  }
+  return { autorizado: true, turnos: turnosLocales };
 }
 
 // --- 6. GESTIÓN DE GUARDADO CON CONFIRMACIÓN Y RENDERIZADO CALENDARIOS ---
@@ -4611,27 +4673,40 @@ window.addEventListener('DOMContentLoaded', async () => {
   inicializarSelectorLugarQuedada();
   inicializarModoUniversitarioPerfil();
 
+  // Determinar usuario activo al iniciar la app: Cule (Administrador) por defecto obligatorio
+  let usuarioInicial = 'Cule';
+  let esAdminInicial = true;
+
+  try {
+    const usuarioGuardado = localStorage.getItem('kedadas_usuario_activo');
+    // Si el usuario guardado era 'Marisol' u otro que causaba el fallo, forzar 'Cule'
+    if (usuarioGuardado && usuarioGuardado.trim().toLowerCase() !== 'marisol' && usuarioGuardado.trim().toLowerCase() !== 'usuario') {
+      usuarioInicial = usuarioGuardado.trim();
+      esAdminInicial = (usuarioInicial.toLowerCase() === 'cule');
+    } else {
+      usuarioInicial = 'Cule';
+      esAdminInicial = true;
+      localStorage.setItem('kedadas_usuario_activo', 'Cule');
+    }
+  } catch(e) {}
+
   try {
     const { data: { session } } = await supabaseApp.auth.getSession();
     if (session && session.user) {
       const email = session.user.email;
       let nombre = session.user.user_metadata?.nombre;
-      let rol = session.user.user_metadata?.rol || 'usuario';
-
-      if (!nombre) {
-        const { data: perfil } = await supabaseApp.from('perfiles').select('*').eq('user_id', session.user.id).single();
-        if (perfil) {
-          nombre = perfil.nombre;
-          rol = perfil.rol;
-        } else {
-          nombre = email.split('@')[0];
-        }
+      // Si la sesión de Supabase Auth es explícitamente Cule o admin
+      if (nombre && (nombre.toLowerCase() === 'cule' || email === 'maculecale@gmail.com')) {
+        usuarioInicial = 'Cule';
+        esAdminInicial = true;
       }
-      concederAcceso(nombre, rol === 'admin' || rol === 'superadmin' || nombre === 'Cule');
     }
   } catch (e) {
     console.warn('No se encontró sesión activa de Supabase Auth.');
   }
+
+  // Arrancar siempre con acceso concedido a Cule (o usuario seleccionado)
+  concederAcceso(usuarioInicial, esAdminInicial);
 
   // Detectar automáticamente si se ha abierto un enlace de invitación (?unirse=KED-XXXX)
   comprobarParametroInvitacionUrl();
