@@ -3329,6 +3329,302 @@ body.dark-theme .bloqueo-privacidad-calendario .subtexto-privacidad {
   50% { transform: scale(1.08); }
 }
 
+/* ========================================================================= */
+/* BARRA SELECTOR RÁPIDO DE UBICACIÓN (1-TOQUE OPTIMISTA)                    */
+/* ========================================================================= */
+.barra-ubicacion-rapida {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(248, 250, 252, 0.95));
+  border: 1.5px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 10px 14px;
+  margin: 10px 0 16px 0;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.04);
+  backdrop-filter: blur(8px);
+}
+
+.ubi-rapido-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ubi-rapido-titulo-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ubi-dot-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 0 rgba(16, 185, 129, 0.4);
+  animation: pulse-dot 2s infinite;
+}
+
+@keyframes pulse-dot {
+  0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.5); }
+  70% { box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+
+.ubi-rapido-label {
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: #475569;
+}
+
+.badge-ubi-status {
+  font-size: 0.75rem;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 12px;
+  transition: all 0.2s ease;
+}
+
+.badge-ubi-status.ubi-origen {
+  background: #dcfce7;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+
+.badge-ubi-status.ubi-estudio {
+  background: #e0e7ff;
+  color: #3730a3;
+  border: 1px solid #c7d2fe;
+}
+
+.badge-ubi-status.ubi-viaje {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+.ubi-segmented-control {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  background: #f1f5f9;
+  padding: 4px;
+  border-radius: 12px;
+}
+
+.ubi-segment-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 8px 6px;
+  border: none;
+  background: transparent;
+  border-radius: 9px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  user-select: none;
+}
+
+.ubi-segment-btn:active {
+  transform: scale(0.96);
+}
+
+.ubi-segment-btn.activo {
+  background: #ffffff;
+  color: #1e293b;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.1);
+}
+
+.ubi-segment-btn.activo[data-ubi="origen"] {
+  color: #15803d;
+  background: #ffffff;
+  border: 1px solid #bbf7d0;
+}
+
+.ubi-segment-btn.activo[data-ubi="estudio/trabajo"] {
+  color: #4338ca;
+  background: #ffffff;
+  border: 1px solid #c7d2fe;
+}
+
+.ubi-segment-btn.activo[data-ubi="viaje"] {
+  color: #b45309;
+  background: #ffffff;
+  border: 1px solid #fde68a;
+}
+
+/* AVATAR LOCATION BADGES */
+.user-avatar-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.avatar-location-badge {
+  position: absolute;
+  bottom: -3px;
+  right: -3px;
+  font-size: 0.7rem;
+  background: #ffffff;
+  border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+  border: 1px solid #cbd5e1;
+  pointer-events: none;
+}
+
+.chat-avatar-ubi {
+  margin-left: 4px;
+  font-size: 0.85rem;
+  vertical-align: middle;
+}
+
+/* ALERTA DE COINCIDENCIAS CON UBICACIONES DISTINTAS */
+.alerta-ubicaciones-distintas {
+  background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+  border: 1.5px solid #fde68a;
+  border-radius: 14px;
+  padding: 12px 14px;
+  margin: 10px 0 14px 0;
+  text-align: left;
+}
+
+.alerta-ubi-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.92rem;
+  font-weight: 800;
+  color: #92400e;
+  margin-bottom: 6px;
+}
+
+.alerta-ubi-desc {
+  font-size: 0.85rem;
+  color: #78350f;
+  margin: 0 0 8px 0;
+}
+
+.alerta-ubi-lista {
+  margin: 0 0 10px 0;
+  padding-left: 20px;
+  font-size: 0.83rem;
+  color: #451a03;
+}
+
+.alerta-ubi-lista li {
+  margin-bottom: 4px;
+}
+
+.badge-ubi-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.badge-ubi-pill.en-origen {
+  background: #dcfce7;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+
+.badge-ubi-pill.en-estudio {
+  background: #e0e7ff;
+  color: #3730a3;
+  border: 1px solid #c7d2fe;
+}
+
+.badge-ubi-pill.en-viaje {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+.alerta-ubi-consejo {
+  background: rgba(255, 255, 255, 0.7);
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  color: #78350f;
+  border-left: 3px solid #f59e0b;
+}
+
+/* DARK THEME SUPPORT */
+body.dark-theme .barra-ubicacion-rapida {
+  background: rgba(30, 41, 59, 0.95);
+  border-color: #475569;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+}
+
+body.dark-theme .ubi-rapido-label {
+  color: #cbd5e1;
+}
+
+body.dark-theme .ubi-segmented-control {
+  background: #1e293b;
+}
+
+body.dark-theme .ubi-segment-btn {
+  color: #94a3b8;
+}
+
+body.dark-theme .ubi-segment-btn.activo {
+  background: #334155;
+  color: #f8fafc;
+}
+
+body.dark-theme .ubi-segment-btn.activo[data-ubi="origen"] {
+  border-color: #059669;
+  color: #6ee7b7;
+}
+
+body.dark-theme .ubi-segment-btn.activo[data-ubi="estudio/trabajo"] {
+  border-color: #6366f1;
+  color: #a5b4fc;
+}
+
+body.dark-theme .ubi-segment-btn.activo[data-ubi="viaje"] {
+  border-color: #f59e0b;
+  color: #fcd34d;
+}
+
+body.dark-theme .avatar-location-badge {
+  background: #1e293b;
+  border-color: #475569;
+}
+
+body.dark-theme .alerta-ubicaciones-distintas {
+  background: rgba(120, 53, 15, 0.25);
+  border-color: #b45309;
+}
+
+body.dark-theme .alerta-ubi-header {
+  color: #fcd34d;
+}
+
+body.dark-theme .alerta-ubi-desc,
+body.dark-theme .alerta-ubi-lista {
+  color: #fde68a;
+}
+
+body.dark-theme .alerta-ubi-consejo {
+  background: rgba(15, 23, 42, 0.6);
+  color: #fef3c7;
+  border-color: #f59e0b;
+}
+
 
 
 

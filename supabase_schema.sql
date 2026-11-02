@@ -28,10 +28,13 @@ alter table public.perfiles add column if not exists user_id uuid references aut
 alter table public.perfiles add column if not exists email text;
 alter table public.perfiles add column if not exists rol text not null default 'usuario';
 alter table public.perfiles add column if not exists is_superadmin boolean not null default false;
-alter table public.perfiles add column if not exists es_universitario boolean not null default false;
+alter table public.perfiles add column if not exists current_location text not null default 'origen' check (current_location in ('origen', 'estudio/trabajo', 'viaje'));
 alter table public.perfiles add column if not exists ciudad_origen text default 'Toledo';
+alter table public.perfiles add column if not exists ciudad_destino text default '';
 alter table public.perfiles add column if not exists ciudad_universidad text;
+alter table public.perfiles add column if not exists es_universitario boolean not null default false;
 alter table public.perfiles add column if not exists ubicacion_actual text default 'origen';
+alter table public.perfiles add column if not exists updated_at timestamptz not null default timezone('utc'::text, now());
 
 -- Eliminar columna PIN de la base de datos (seguridad estricta Supabase Auth)
 alter table public.perfiles drop column if exists pin;
@@ -308,6 +311,9 @@ where t.usuario_id is null
   );
 
 -- RPC: Coincidencias de días libres del grupo (Zero-Knowledge: no expone turnos laborales)
+-- IMPORTANTE: Dropear firma previa para evitar error PostgreSQL 42P13 al modificar tipo de retorno
+drop function if exists public.get_group_free_matches(uuid, text, date, date);
+
 create or replace function public.get_group_free_matches(
   p_group_id uuid default null,
   p_group_name text default null,
@@ -317,7 +323,8 @@ create or replace function public.get_group_free_matches(
 returns table (
   match_date date,
   total_free_members bigint,
-  free_member_names text[]
+  free_member_names text[],
+  free_member_locations jsonb
 )
 language plpgsql
 security definer
@@ -344,7 +351,8 @@ begin
         u.raw_user_meta_data->>'nombre',
         split_part(u.email, '@', 1),
         'Compañero'
-      ) as user_name
+      ) as user_name,
+      coalesce(p.current_location, p.ubicacion_actual, 'origen') as user_location
     from public.group_members gm
     join auth.users u on u.id = gm.user_id
     left join public.perfiles p on p.user_id = gm.user_id
@@ -353,7 +361,7 @@ begin
   ),
   free_days as (
     -- Días libres en schedules
-    select s.date, gu.user_name
+    select s.date, gu.user_name, gu.user_location
     from public.schedules s
     join group_users gu on gu.user_id = s.user_id
     where s.is_free = true and s.date >= p_start_date and s.date <= p_end_date
@@ -363,7 +371,8 @@ begin
     -- Días libres en Turnos (indiceEstado = 1) sin filtro de grupo
     select 
       make_date(split_part(t.mes_anio, '-', 1)::int, split_part(t.mes_anio, '-', 2)::int + 1, t.dia) as date,
-      gu.user_name
+      gu.user_name,
+      gu.user_location
     from public."Turnos" t
     join group_users gu on (gu.user_id = t.usuario_id or lower(gu.user_name) = lower(t.usuario))
     where t.indiceEstado = 1
@@ -371,7 +380,16 @@ begin
   select 
     fd.date as match_date,
     count(distinct fd.user_name) as total_free_members,
-    array_agg(distinct fd.user_name) as free_member_names
+    array_agg(distinct fd.user_name) as free_member_names,
+    jsonb_agg(distinct jsonb_build_object(
+      'name', fd.user_name,
+      'location', fd.user_location,
+      'icon', case 
+        when fd.user_location = 'estudio/trabajo' then '🎒'
+        when fd.user_location = 'viaje' then '✈️'
+        else '🏠'
+      end
+    )) as free_member_locations
   from free_days fd
   where fd.date >= p_start_date and fd.date <= p_end_date
   group by fd.date
@@ -460,9 +478,20 @@ alter table public.push_subscriptions force row level security;
 alter table public.user_passkeys enable row level security;
 alter table public.user_passkeys force row level security;
 
--- POLÍTICAS: PERFILES
+-- POLÍTICAS: PERFILES (Regla de negocio: lectura compartida entre miembros de grupo, edición estrictamente propia)
 drop policy if exists "perfiles_select" on public.perfiles;
-create policy "perfiles_select" on public.perfiles for select to authenticated using (true);
+create policy "perfiles_select" on public.perfiles for select to authenticated
+  using (
+    public.is_superadmin()
+    or user_id = auth.uid()
+    or exists (
+      select 1
+      from public.group_members gm_me
+      join public.group_members gm_other on gm_me.group_id = gm_other.group_id
+      where gm_me.user_id = auth.uid()
+        and gm_other.user_id = public.perfiles.user_id
+    )
+  );
 
 drop policy if exists "perfiles_insert" on public.perfiles;
 create policy "perfiles_insert" on public.perfiles for insert to authenticated
@@ -470,7 +499,8 @@ create policy "perfiles_insert" on public.perfiles for insert to authenticated
 
 drop policy if exists "perfiles_update" on public.perfiles;
 create policy "perfiles_update" on public.perfiles for update to authenticated
-  using (public.is_superadmin() or user_id = auth.uid());
+  using (public.is_superadmin() or user_id = auth.uid())
+  with check (public.is_superadmin() or user_id = auth.uid());
 
 -- POLÍTICAS: GRUPOS
 drop policy if exists "groups_select" on public.groups;

@@ -343,6 +343,7 @@ function concederAcceso(nombreUsuario, rolAdmin) {
   if (typeof window.cargarDatosUniversitariosEnPerfil === 'function') {
     window.cargarDatosUniversitariosEnPerfil();
   }
+  actualizarSelectorUbicacionRapido();
 }
 
 // --- 3. GESTIÓN DINÁMICA DE USUARIOS (DUAL SUPABASE + LOCAL) ---
@@ -638,18 +639,155 @@ function renderizarPanelGestionUsuarios() {
   });
 }
 
+// =========================================================================
+// SISTEMA DE UBICACIÓN DINÁMICA (ORIGEN, ESTUDIO/TRABAJO, VIAJE)
+// =========================================================================
+
+function normalizarUbicacion(loc) {
+  if (!loc) return 'origen';
+  const l = loc.toLowerCase().trim();
+  if (l === 'viaje') return 'viaje';
+  if (l === 'estudio/trabajo' || l === 'estudio_trabajo' || l === 'universidad' || l === 'trabajo' || l === 'estudio') {
+    return 'estudio/trabajo';
+  }
+  return 'origen';
+}
+
+function obtenerIconoUbicacion(nombreUsuario) {
+  const p = listaPerfiles.find(item => item.nombre.toLowerCase() === (nombreUsuario || '').toLowerCase());
+  const loc = normalizarUbicacion(p ? (p.current_location || p.ubicacion_actual) : 'origen');
+  const isUniv = p && p.es_universitario;
+  const ciudadDestino = (p && (p.ciudad_destino || p.ciudad_universidad)) || '';
+  const ciudadOrigen = (p && p.ciudad_origen) || 'Origen';
+
+  if (loc === 'viaje') {
+    return {
+      loc: 'viaje',
+      icon: '✈️',
+      title: `${nombreUsuario || 'Usuario'} está de viaje / fuera`,
+      text: 'De Viaje',
+      pillClass: 'en-viaje'
+    };
+  }
+  if (loc === 'estudio/trabajo') {
+    const label = ciudadDestino ? `En ${ciudadDestino}` : (isUniv ? 'En Campus' : 'Estudio/Trabajo');
+    return {
+      loc: 'estudio/trabajo',
+      icon: isUniv ? '🎒' : '💼',
+      title: `${nombreUsuario || 'Usuario'} desplazado/a en ${ciudadDestino || 'su ciudad de estudio/trabajo'}`,
+      text: label,
+      pillClass: 'en-estudio'
+    };
+  }
+  return {
+    loc: 'origen',
+    icon: '🏠',
+    title: `${nombreUsuario || 'Usuario'} en ciudad de origen (${ciudadOrigen})`,
+    text: `En ${ciudadOrigen}`,
+    pillClass: 'en-origen'
+  };
+}
+
+function actualizarSelectorUbicacionRapido() {
+  const container = document.getElementById('barra-ubicacion-rapida');
+  if (!container) return;
+
+  const usuarioActivo = usuarioLogueado || miUsuario;
+  const p = listaPerfiles.find(item => item.nombre.toLowerCase() === (usuarioActivo || '').toLowerCase());
+  const loc = normalizarUbicacion(p ? (p.current_location || p.ubicacion_actual) : 'origen');
+
+  const badge = document.getElementById('ubi-rapido-status-badge');
+  const btnOrigen = document.getElementById('btn-ubi-quick-origen');
+  const btnEstudio = document.getElementById('btn-ubi-quick-estudio');
+  const btnViaje = document.getElementById('btn-ubi-quick-viaje');
+
+  if (btnOrigen) btnOrigen.classList.toggle('activo', loc === 'origen');
+  if (btnEstudio) btnEstudio.classList.toggle('activo', loc === 'estudio/trabajo');
+  if (btnViaje) btnViaje.classList.toggle('activo', loc === 'viaje');
+
+  if (badge) {
+    badge.className = 'badge-ubi-status';
+    if (loc === 'origen') {
+      badge.classList.add('ubi-origen');
+      badge.textContent = `🏠 En Ciudad de Origen${p && p.ciudad_origen ? ' (' + p.ciudad_origen + ')' : ''}`;
+    } else if (loc === 'viaje') {
+      badge.classList.add('ubi-viaje');
+      badge.textContent = `✈️ De Viaje / Fuera`;
+    } else {
+      badge.classList.add('ubi-estudio');
+      const ciudad = (p && (p.ciudad_destino || p.ciudad_universidad)) || 'Destino';
+      const icon = (p && p.es_universitario) ? '🎒' : '💼';
+      badge.textContent = `${icon} En Estudio / Trabajo (${ciudad})`;
+    }
+  }
+}
+
+async function cambiarUbicacionRapida(nuevaUbi) {
+  const usuarioActivo = usuarioLogueado || miUsuario;
+  const perfil = listaPerfiles.find(p => p.nombre.toLowerCase() === (usuarioActivo || '').toLowerCase());
+  if (!perfil) return;
+
+  const locNorm = normalizarUbicacion(nuevaUbi);
+
+  // 1. Actualización Optimista Instantánea en la UI
+  perfil.current_location = locNorm;
+  perfil.ubicacion_actual = locNorm;
+  guardarPerfilesLocales();
+  actualizarSelectorUbicacionRapido();
+  renderizarFiltroCoincidencias();
+  renderizarPanelGestionGrupoActivo();
+
+  // 2. Sincronización en segundo plano con Supabase
+  try {
+    const payload = {
+      current_location: locNorm,
+      ubicacion_actual: locNorm,
+      updated_at: new Date().toISOString()
+    };
+    await supabaseApp.from('perfiles')
+      .update(payload)
+      .eq('nombre', perfil.nombre);
+  } catch (err) {
+    console.warn('Aviso guardado Supabase ubicación:', err);
+  }
+}
+
+function inicializarSelectorUbicacionRapido() {
+  const btns = document.querySelectorAll('.ubi-segment-btn');
+  btns.forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const ubi = btn.dataset.ubi;
+      if (ubi) cambiarUbicacionRapida(ubi);
+    });
+  });
+  actualizarSelectorUbicacionRapido();
+}
+
 function alternarUbicacionUsuario(nombreUsuario) {
   const perfil = listaPerfiles.find(p => p.nombre.toLowerCase() === (nombreUsuario || '').toLowerCase());
   if (!perfil) return;
-  perfil.ubicacion_actual = (perfil.ubicacion_actual === 'universidad') ? 'origen' : 'universidad';
+  const actual = normalizarUbicacion(perfil.current_location || perfil.ubicacion_actual);
+  let siguiente = 'origen';
+  if (actual === 'origen') siguiente = 'estudio/trabajo';
+  else if (actual === 'estudio/trabajo') siguiente = 'viaje';
+  else siguiente = 'origen';
+
+  perfil.current_location = siguiente;
+  perfil.ubicacion_actual = siguiente;
   guardarPerfilesLocales();
+
   try {
-    supabaseApp.from('perfiles').update({ ubicacion_actual: perfil.ubicacion_actual }).eq('nombre', perfil.nombre);
+    supabaseApp.from('perfiles').update({
+      current_location: siguiente,
+      ubicacion_actual: siguiente,
+      updated_at: new Date().toISOString()
+    }).eq('nombre', perfil.nombre);
   } catch(e) {}
+
+  actualizarSelectorUbicacionRapido();
   renderizarFiltroCoincidencias();
-  if (typeof window.cargarDatosUniversitariosEnPerfil === 'function') {
-    window.cargarDatosUniversitariosEnPerfil();
-  }
+  renderizarPanelGestionGrupoActivo();
 }
 
 function renderizarBannerUbicacionUniversitarios() {
@@ -658,45 +796,34 @@ function renderizarBannerUbicacionUniversitarios() {
   if (!banner) return;
 
   const seleccionados = Array.from(usuariosSeleccionadosCoincidencias);
-  const univsEnGrupo = seleccionados
-    .map(u => listaPerfiles.find(p => p.nombre.toLowerCase() === u.toLowerCase()))
-    .filter(p => p && p.es_universitario);
+  const infoUsuarios = seleccionados.map(u => ({
+    nombre: u,
+    ...obtenerIconoUbicacion(u)
+  }));
 
-  const enUniv = univsEnGrupo.filter(p => p.ubicacion_actual === 'universidad');
-  const enOrigen = seleccionados.filter(u => {
-    const p = listaPerfiles.find(item => item.nombre.toLowerCase() === u.toLowerCase());
-    return !p || !p.es_universitario || p.ubicacion_actual !== 'universidad';
-  });
+  const enOrigen = infoUsuarios.filter(i => i.loc === 'origen');
+  const enEstudio = infoUsuarios.filter(i => i.loc === 'estudio/trabajo');
+  const enViaje = infoUsuarios.filter(i => i.loc === 'viaje');
 
   if (badgeContador) {
-    badgeContador.textContent = `${enUniv.length} en la universidad`;
+    badgeContador.textContent = `${enEstudio.length} en estudio/trabajo`;
   }
 
-  if (univsEnGrupo.length === 0) {
-    banner.innerHTML = `📍 <strong>Situación actual:</strong> Todos los miembros seleccionados residen en su ciudad de origen.`;
-  } else {
-    const strUniv = enUniv.length > 0 
-      ? enUniv.map(p => `<strong>${escapeHtml(p.nombre)}</strong> (${escapeHtml(p.ciudad_universidad || 'Universidad')})`).join(', ')
-      : '<em style="color:#64748b;">Ninguno</em>';
-    const strOrigen = enOrigen.length > 0 
-      ? enOrigen.map(u => `<strong>${escapeHtml(u)}</strong>`).join(', ')
-      : '<em style="color:#64748b;">Ninguno</em>';
+  const strOrigen = enOrigen.length > 0 
+    ? enOrigen.map(u => `<strong>${escapeHtml(u.nombre)}</strong>`).join(', ')
+    : '<em style="color:#64748b;">Ninguno</em>';
+  const strEstudio = enEstudio.length > 0 
+    ? enEstudio.map(u => `<strong>${escapeHtml(u.nombre)}</strong> (${escapeHtml(u.text)})`).join(', ')
+    : '<em style="color:#64748b;">Ninguno</em>';
+  const strViaje = enViaje.length > 0 
+    ? enViaje.map(u => `<strong>${escapeHtml(u.nombre)}</strong>`).join(', ')
+    : '';
 
-    let sugerenciaFiltro = '';
-    if (filtroLugarQuedada === 'origen') {
-      sugerenciaFiltro = `<div style="margin-top: 5px; color: #047857;">🏠 <strong>Filtro activo:</strong> Quedada en Ciudad de Origen. Si libran, los que estudian fuera bajarán a reunirse con el grupo.</div>`;
-    } else if (filtroLugarQuedada === 'universidad') {
-      sugerenciaFiltro = `<div style="margin-top: 5px; color: #4338ca;">🎒 <strong>Filtro activo:</strong> Escapada a la Universidad. El grupo viajará a visitar a los que estudian fuera.</div>`;
-    } else {
-      sugerenciaFiltro = `<div style="margin-top: 5px; color: #64748b;">🌍 <strong>Filtro activo:</strong> Cualquier sitio (te aconsejaremos el mejor punto según la mayoría).</div>`;
-    }
-
-    banner.innerHTML = `
-      <div>🏠 <strong>En Ciudad de Origen:</strong> ${strOrigen}</div>
-      <div style="margin-top: 4px;">🎓 <strong>En la Universidad:</strong> ${strUniv}</div>
-      ${sugerenciaFiltro}
-    `;
-  }
+  banner.innerHTML = `
+    <div>🏠 <strong>En Ciudad de Origen:</strong> ${strOrigen}</div>
+    <div style="margin-top: 4px;">💼 <strong>En Estudio / Trabajo:</strong> ${strEstudio}</div>
+    ${strViaje ? `<div style="margin-top: 4px;">✈️ <strong>De Viaje:</strong> ${strViaje}</div>` : ''}
+  `;
 }
 
 function inicializarSelectorLugarQuedada() {
@@ -748,23 +875,18 @@ function renderizarFiltroCoincidencias() {
     label.appendChild(check);
     label.appendChild(document.createTextNode(u));
 
-    // Si es universitario, añadir chip interactivo de ubicación
-    const perfil = listaPerfiles.find(p => p.nombre.toLowerCase() === u.toLowerCase());
-    if (perfil && perfil.es_universitario) {
-      const ubiPill = document.createElement('span');
-      const estaEnUniv = (perfil.ubicacion_actual === 'universidad');
-      ubiPill.className = `chip-univ-pill ${estaEnUniv ? 'en-univ' : 'en-origen'}`;
-      ubiPill.textContent = estaEnUniv 
-        ? `🎓 Univ${perfil.ciudad_universidad ? ': ' + perfil.ciudad_universidad : ''}` 
-        : `🏠 En Origen`;
-      ubiPill.title = 'Toca para cambiar si está en origen o en la universidad';
-      ubiPill.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        alternarUbicacionUsuario(u);
-      });
-      label.appendChild(ubiPill);
-    }
+    // Chip interactivo de ubicación de este usuario
+    const ubiInfo = obtenerIconoUbicacion(u);
+    const ubiPill = document.createElement('span');
+    ubiPill.className = `chip-univ-pill ${ubiInfo.pillClass}`;
+    ubiPill.textContent = `${ubiInfo.icon} ${ubiInfo.text}`;
+    ubiPill.title = `Ubicación actual de ${escapeHtml(u)}: ${ubiInfo.title}. Toca para cambiarla.`;
+    ubiPill.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      alternarUbicacionUsuario(u);
+    });
+    label.appendChild(ubiPill);
 
     listaFiltroCoincidencias.appendChild(label);
   });
@@ -1175,15 +1297,20 @@ function renderizarPanelGestionGrupoActivo() {
       const esYo = usuarioLogueado && m.toLowerCase() === usuarioLogueado.toLowerCase();
       const inicial = m.charAt(0).toUpperCase();
 
+      const ubi = obtenerIconoUbicacion(m);
       const item = document.createElement('div');
       item.className = 'miembro-card-item';
       item.innerHTML = `
         <div class="miembro-info-wrap">
-          <div class="miembro-avatar-icon">${escapeHtml(inicial)}</div>
+          <div class="miembro-avatar-icon" style="position: relative;">
+            ${escapeHtml(inicial)}
+            <span class="avatar-location-badge" title="${escapeHtml(ubi.title)}">${ubi.icon}</span>
+          </div>
           <div>
             <div class="miembro-nombre-txt">${escapeHtml(m)} ${esYo ? '<small style="color:#6366f1; font-weight:800;">(Tú)</small>' : ''}</div>
             <div class="miembro-tags-row">
               <span class="${esCreador ? 'badge-rol-admin' : 'badge-rol-miembro'}">${esCreador ? '👑 Creador / Admin' : '👤 Miembro'}</span>
+              <span class="badge-ubi-pill ${ubi.pillClass}">${ubi.icon} ${escapeHtml(ubi.text)}</span>
             </div>
           </div>
         </div>
@@ -2481,6 +2608,50 @@ btnCoincidencias.addEventListener('click', async () => {
       return `${dia}`;
     }).join(', ');
 
+    // Análisis de ubicaciones de los miembros seleccionados
+    const infoMiembrosUbicacion = seleccionados.map(nombre => {
+      const ubi = obtenerIconoUbicacion(nombre);
+      return { nombre, ...ubi };
+    });
+
+    const ubicacionesDistintas = new Set(infoMiembrosUbicacion.map(m => m.loc)).size > 1;
+
+    let alertaUbicacionesHtml = '';
+    if (ubicacionesDistintas) {
+      alertaUbicacionesHtml = `
+        <div class="alerta-ubicaciones-distintas">
+          <div class="alerta-ubi-header">
+            <span class="alerta-ubi-icon">⚠️</span>
+            <strong>¡Atención! Estáis en ciudades distintas</strong>
+          </div>
+          <p class="alerta-ubi-desc">
+            Tenéis días libres en común, pero <strong>no todos os encontráis en el mismo sitio</strong> este mes:
+          </p>
+          <ul class="alerta-ubi-lista">
+            ${infoMiembrosUbicacion.map(m => `
+              <li><strong>${escapeHtml(m.nombre)}:</strong> <span class="badge-ubi-pill ${m.pillClass}">${m.icon} ${escapeHtml(m.text)}</span></li>
+            `).join('')}
+          </ul>
+          <div class="alerta-ubi-consejo">
+            💡 <strong>Consejo para quedar:</strong> Coordinad si los desplazados bajan a la ciudad de origen o si el resto organiza una visita a su ciudad de estudio/trabajo.
+          </div>
+        </div>
+      `;
+    } else {
+      const ubiComun = infoMiembrosUbicacion[0] || { text: 'En Origen', icon: '🏠' };
+      alertaUbicacionesHtml = `
+        <div class="alerta-ubicaciones-distintas" style="background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%); border-color: #bbf7d0;">
+          <div class="alerta-ubi-header" style="color: #166534;">
+            <span>✅</span>
+            <strong>¡Ubicaciones 100% alineadas!</strong>
+          </div>
+          <p class="alerta-ubi-desc" style="color: #15803d; margin: 0;">
+            Todos los miembros seleccionados os encontráis en <strong>${escapeHtml(ubiComun.text)}</strong> (${ubiComun.icon}). ¡No hay barreras geográficas para celebrar la kedada!
+          </p>
+        </div>
+      `;
+    }
+
     resultadoCoincidencias.innerHTML = `
       <div style="font-size: 1.05rem; font-weight: 800; color: #065f46; margin-bottom: 6px;">
         🎉 ¡Días libres en común en ${escapeHtml(grupoActivo)}!
@@ -2489,6 +2660,9 @@ btnCoincidencias.addEventListener('click', async () => {
         Coincidís libres (<strong>${escapeHtml(nombresGrupo)}</strong>) los días: 
         <strong style="font-size: 1.12rem; color: #4f46e5;">${diasComunesFormateados}</strong> de ${nombresMeses[fechaNavegacion.getMonth()]}
       </div>
+
+      <!-- Alerta Inteligente de Ubicación -->
+      ${alertaUbicacionesHtml}
       
       <!-- Tarjeta de Punto de Encuentro y Universitarios -->
       <div class="recom-quedada-box">
@@ -3075,10 +3249,12 @@ function pintarMensaje(msg) {
 
   const horaDisplay = msg.hora || (msg.created_at ? new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '');
   
+  const ubi = obtenerIconoUbicacion(msg.usuario);
+
   div.innerHTML = `
     <div class="mensaje-contenido">
       <div style="display: flex; justify-content: space-between; gap: 8px; font-size: 0.75rem; margin-bottom: 2px; opacity: 0.85;">
-        <strong>${esMio ? 'Tú' : escapeHtml(msg.usuario)}</strong>
+        <strong>${esMio ? 'Tú' : escapeHtml(msg.usuario)} <span class="chat-avatar-ubi" title="${escapeHtml(ubi.title)}">${ubi.icon}</span></strong>
         ${horaDisplay ? `<span>${escapeHtml(horaDisplay)}</span>` : ''}
       </div>
       <div>${escapeHtml(msg.texto)}</div>
@@ -4453,3 +4629,7 @@ function comprobarParametroInvitacionUrl() {
   } catch (e) {}
 }
 
+// Inicializar selector rápido de ubicación al arrancar
+try {
+  inicializarSelectorUbicacionRapido();
+} catch (e) {}

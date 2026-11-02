@@ -83,6 +83,31 @@
       </div>
     </header>
 
+    <!-- SELECTOR RÁPIDO DE UBICACIÓN (1-TOQUE OPTIMISTA) -->
+    <div class="barra-ubicacion-rapida" id="barra-ubicacion-rapida">
+      <div class="ubi-rapido-header">
+        <div class="ubi-rapido-titulo-wrap">
+          <span class="ubi-dot-pulse"></span>
+          <span class="ubi-rapido-label">📍 Mi ubicación actual:</span>
+        </div>
+        <span id="ubi-rapido-status-badge" class="badge-ubi-status ubi-origen">🏠 En Ciudad de Origen</span>
+      </div>
+      <div class="ubi-segmented-control" role="group" aria-label="Cambiar mi ubicación actual">
+        <button type="button" class="ubi-segment-btn activo" id="btn-ubi-quick-origen" data-ubi="origen" title="Estoy en mi ciudad o pueblo de origen">
+          <span class="ubi-icon">🏠</span>
+          <span class="ubi-txt">En Origen</span>
+        </button>
+        <button type="button" class="ubi-segment-btn" id="btn-ubi-quick-estudio" data-ubi="estudio/trabajo" title="Estoy desplazado por estudio o trabajo">
+          <span class="ubi-icon">💼</span>
+          <span class="ubi-txt">Estudio / Trabajo</span>
+        </button>
+        <button type="button" class="ubi-segment-btn" id="btn-ubi-quick-viaje" data-ubi="viaje" title="Estoy de viaje, escapada o vacaciones fuera">
+          <span class="ubi-icon">✈️</span>
+          <span class="ubi-txt">De Viaje</span>
+        </button>
+      </div>
+    </div>
+
     <!-- BARRA DE NAVEGACIÓN PRINCIPAL POR PESTAÑAS (Fija abajo en móvil, elegante arriba en PC) -->
     <nav class="app-nav-tabs" id="app-nav-tabs" aria-label="Navegación principal">
       <button type="button" class="nav-tab-btn activo" data-tab="cuadrante">
