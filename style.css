@@ -407,6 +407,439 @@ body.dark-theme .chat-titulo { color: #7bed9f; }
   color: #065f46;
 }
 
+.chip-univ-pill {
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #e0e7ff;
+  color: #3730a3;
+  margin-left: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: 1px solid #c7d2fe;
+}
+.chip-univ-pill.en-univ {
+  background: #fef3c7;
+  color: #92400e;
+  border-color: #fde68a;
+}
+.chip-univ-pill.en-origen {
+  background: #dcfce7;
+  color: #166534;
+  border-color: #bbf7d0;
+}
+
+/* ========================================= */
+/* --- CAMPO UNIVERSITARIOS Y QUEDADAS ----- */
+/* ========================================= */
+.coincidencias-univ-box {
+  background: #ffffff;
+  border: 1.5px solid #e0e7ff;
+  border-radius: 14px;
+  padding: 14px;
+  margin-top: 14px;
+  margin-bottom: 14px;
+  box-shadow: 0 2px 8px rgba(79, 70, 229, 0.04);
+}
+
+.filtro-univ-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 10px;
+  gap: 8px;
+}
+
+.filtro-univ-titulo-wrap {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.filtro-univ-icon {
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.filtro-sub-univ {
+  font-size: 0.78rem;
+  color: #64748b;
+  margin: 2px 0 0 0;
+  line-height: 1.3;
+}
+
+.badge-contador-univ {
+  background: #e0e7ff;
+  color: #4338ca;
+  font-size: 0.74rem;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.selector-lugar-quedada-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.btn-filtro-lugar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  background: #f8fafc;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 8px 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+
+.btn-filtro-lugar .icon-lugar {
+  font-size: 1.15rem;
+}
+
+.btn-filtro-lugar .texto-lugar {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #475569;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.btn-filtro-lugar:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+}
+
+.btn-filtro-lugar.activo {
+  background: #eef2ff;
+  border-color: #4f46e5;
+  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.15);
+}
+
+.btn-filtro-lugar.activo .texto-lugar {
+  color: #3730a3;
+  font-weight: 800;
+}
+
+.banner-estado-ubicaciones-grupo {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  font-size: 0.8rem;
+  color: #475569;
+  line-height: 1.4;
+}
+
+/* Tarjeta Modo Universitario en tab-usuarios */
+.card-modo-universitario {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 16px;
+  margin-top: 16px;
+  margin-bottom: 16px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.03);
+}
+
+.univ-header-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.univ-icon-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.univ-icon-badge {
+  font-size: 1.6rem;
+  background: #eef2ff;
+  border-radius: 12px;
+  padding: 8px;
+  line-height: 1;
+}
+
+.univ-header-card h4 {
+  margin: 0;
+  font-size: 0.98rem;
+  font-weight: 800;
+  color: #1e293b;
+}
+
+.univ-sub {
+  margin: 3px 0 0 0;
+  font-size: 0.78rem;
+  color: #64748b;
+  line-height: 1.35;
+}
+
+/* Switch toggle minimalista */
+.switch-toggle-univ {
+  position: relative;
+  display: inline-block;
+  width: 48px;
+  height: 26px;
+  flex-shrink: 0;
+}
+
+.switch-toggle-univ input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider-univ {
+  position: absolute;
+  cursor: pointer;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: #cbd5e1;
+  transition: 0.25s;
+  border-radius: 34px;
+}
+
+.slider-univ:before {
+  position: absolute;
+  content: "";
+  height: 20px;
+  width: 20px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: 0.25s;
+  border-radius: 50%;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.switch-toggle-univ input:checked + .slider-univ {
+  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+}
+
+.switch-toggle-univ input:checked + .slider-univ:before {
+  transform: translateX(22px);
+}
+
+.caja-campos-universitario {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed #e2e8f0;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.fila-inputs-ciudades {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+@media (max-width: 540px) {
+  .fila-inputs-ciudades {
+    grid-template-columns: 1fr;
+  }
+  .selector-lugar-quedada-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.campo-ciudad-item label {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #475569;
+  margin-bottom: 4px;
+}
+
+.campo-ciudad-item input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.fila-ubicacion-actual {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px;
+  margin-bottom: 8px;
+}
+
+.ubicacion-label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #334155;
+  margin-bottom: 6px;
+}
+
+.selector-ubicacion-botones {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-ubicacion-chip {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 8px;
+  background: white;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+
+.btn-ubicacion-chip:hover {
+  background: #f1f5f9;
+}
+
+.btn-ubicacion-chip.activo {
+  border-color: #4f46e5;
+  background: #eef2ff;
+  color: #3730a3;
+  font-weight: 800;
+  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.15);
+}
+
+/* Tarjeta de recomendación de quedada en resultados */
+.recom-quedada-box {
+  background: #ffffff;
+  border: 1.5px solid #c7d2fe;
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-top: 12px;
+  box-shadow: 0 2px 8px rgba(79, 70, 229, 0.08);
+  text-align: left;
+}
+
+.recom-quedada-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  gap: 6px;
+}
+
+.recom-quedada-title {
+  font-size: 0.88rem;
+  font-weight: 800;
+  color: #3730a3;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.recom-quedada-lugar-badge {
+  background: #e0e7ff;
+  color: #3730a3;
+  font-size: 0.74rem;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.recom-quedada-desc {
+  font-size: 0.82rem;
+  color: #475569;
+  line-height: 1.45;
+  margin-bottom: 8px;
+}
+
+.recom-quedada-lista {
+  margin: 6px 0 10px 0;
+  padding-left: 18px;
+  font-size: 0.8rem;
+  color: #475569;
+}
+
+.btn-proponer-plan-kdd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 0.82rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  width: 100%;
+}
+.btn-proponer-plan-kdd:hover {
+  opacity: 0.95;
+  transform: translateY(-1px);
+}
+
+/* Modo oscuro */
+body.dark-theme .coincidencias-univ-box,
+body.dark-theme .card-modo-universitario,
+body.dark-theme .recom-quedada-box {
+  background: #1e293b;
+  border-color: #334155;
+  color: #f1f5f9;
+}
+body.dark-theme .filtro-sub-univ,
+body.dark-theme .univ-sub,
+body.dark-theme .recom-quedada-desc,
+body.dark-theme .recom-quedada-lista {
+  color: #94a3b8;
+}
+body.dark-theme .btn-filtro-lugar,
+body.dark-theme .btn-ubicacion-chip {
+  background: #0f172a;
+  border-color: #334155;
+  color: #cbd5e1;
+}
+body.dark-theme .btn-filtro-lugar.activo,
+body.dark-theme .btn-ubicacion-chip.activo {
+  background: #312e81;
+  border-color: #6366f1;
+  color: #e0e7ff;
+}
+body.dark-theme .banner-estado-ubicaciones-grupo,
+body.dark-theme .fila-ubicacion-actual {
+  background: #0f172a;
+  border-color: #334155;
+  color: #cbd5e1;
+}
+body.dark-theme .campo-ciudad-item input {
+  background: #0f172a;
+  border-color: #334155;
+  color: #f1f5f9;
+}
+body.dark-theme .chip-univ-pill.en-univ {
+  background: #78350f;
+  color: #fde68a;
+  border-color: #92400e;
+}
+body.dark-theme .chip-univ-pill.en-origen {
+  background: #064e3b;
+  color: #a7f3d0;
+  border-color: #047857;
+}
+
 /* ========================================= */
 /* --- MODAL DE SECUENCIA AVANZADA --------- */
 /* ========================================= */

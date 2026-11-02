@@ -27,6 +27,10 @@ alter table public.perfiles add column if not exists email text;
 alter table public.perfiles add column if not exists pin text;
 alter table public.perfiles add column if not exists rol text not null default 'usuario';
 alter table public.perfiles add column if not exists is_superadmin boolean not null default false;
+alter table public.perfiles add column if not exists es_universitario boolean not null default false;
+alter table public.perfiles add column if not exists ciudad_origen text default 'Toledo';
+alter table public.perfiles add column if not exists ciudad_universidad text;
+alter table public.perfiles add column if not exists ubicacion_actual text default 'origen';
 
 -- Enlazar user_id (UUID) con auth.users mediante coincidencia de email o nombre
 update public.perfiles p

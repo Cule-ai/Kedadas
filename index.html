@@ -178,7 +178,41 @@
             </div>
             <div id="coincidencias-usuarios-lista" class="coincidencias-usuarios-lista"></div>
           </div>
-          <button id="btn-coincidencias" class="btn-coincidencias">🔍 Buscar días libres en común</button>
+
+          <!-- CAMPO DE COINCIDENCIA PARA UNIVERSITARIOS: DÓNDE QUEDAR -->
+          <div class="coincidencias-univ-box" id="coincidencias-univ-box">
+            <div class="filtro-univ-header">
+              <div class="filtro-univ-titulo-wrap">
+                <span class="filtro-univ-icon">🎓</span>
+                <div>
+                  <span class="filtro-titulo">Punto de Encuentro / Universitarios</span>
+                  <p class="filtro-sub-univ">Descubre si están en su ciudad de origen o en la facultad y dónde cuadra mejor quedar.</p>
+                </div>
+              </div>
+              <span class="badge-contador-univ" id="badge-contador-univ">0 en universidad</span>
+            </div>
+
+            <!-- Selector de dónde quedar -->
+            <div class="selector-lugar-quedada-grid" id="selector-lugar-quedada-grid">
+              <button type="button" class="btn-filtro-lugar activo" data-lugar="todos">
+                <span class="icon-lugar">🌍</span>
+                <span class="texto-lugar">Cualquier sitio</span>
+              </button>
+              <button type="button" class="btn-filtro-lugar" data-lugar="origen">
+                <span class="icon-lugar">🏠</span>
+                <span class="texto-lugar">En Ciudad de Origen</span>
+              </button>
+              <button type="button" class="btn-filtro-lugar" data-lugar="universidad">
+                <span class="icon-lugar">🎓</span>
+                <span class="texto-lugar">En la Universidad</span>
+              </button>
+            </div>
+
+            <!-- Resumen dinámico de ubicaciones de los miembros seleccionados -->
+            <div id="banner-estado-ubicaciones-grupo" class="banner-estado-ubicaciones-grupo"></div>
+          </div>
+
+          <button id="btn-coincidencias" class="btn-coincidencias">🔍 Buscar días libres y dónde quedar</button>
           <div id="resultado-coincidencias" class="resultados-box"></div>
         </div>
       </div>
@@ -399,6 +433,52 @@
           <button id="btn-notificaciones" class="btn-chip-action" title="Activar avisos de coincidencias">🔔 Notificaciones</button>
           <button type="button" id="btn-top-personas" class="btn-chip-action" style="display: none;">👥 Personas</button>
           <button id="btn-logout" class="btn-chip-action btn-danger-chip" title="Cerrar sesión">🚪 Cerrar Sesión</button>
+        </div>
+      </div>
+
+      <!-- Tarjeta de Modo Universitario y Ubicación Personal -->
+      <div class="card-modo-universitario" id="card-modo-universitario">
+        <div class="univ-header-card">
+          <div class="univ-icon-title">
+            <span class="univ-icon-badge">🎓</span>
+            <div>
+              <h4>Modo Universitario / Fuera de Origen</h4>
+              <p class="univ-sub">Indica si estudias en la universidad para que tus amigos sepan dónde encontrarte y planear quedadas.</p>
+            </div>
+          </div>
+          <label class="switch-toggle-univ" title="Activar / Desactivar modo universitario">
+            <input type="checkbox" id="check-es-universitario">
+            <span class="slider-univ"></span>
+          </label>
+        </div>
+
+        <div id="caja-campos-universitario" class="caja-campos-universitario" style="display: none;">
+          <div class="fila-inputs-ciudades">
+            <div class="campo-ciudad-item">
+              <label for="input-ciudad-origen">🏠 Ciudad / Pueblo de Origen:</label>
+              <input type="text" id="input-ciudad-origen" placeholder="Ej: Toledo" maxlength="35">
+            </div>
+            <div class="campo-ciudad-item">
+              <label for="input-ciudad-univ">🎓 Ciudad Universitaria / Campus:</label>
+              <input type="text" id="input-ciudad-univ" placeholder="Ej: Madrid (Moncloa)" maxlength="35">
+            </div>
+          </div>
+
+          <div class="fila-ubicacion-actual">
+            <span class="ubicacion-label">📍 ¿Dónde te encuentras habitualmente este mes?:</span>
+            <div class="selector-ubicacion-botones">
+              <button type="button" class="btn-ubicacion-chip activo" id="btn-ubicacion-origen" data-ubi="origen">
+                🏠 En Ciudad de Origen
+              </button>
+              <button type="button" class="btn-ubicacion-chip" id="btn-ubicacion-univ" data-ubi="universidad">
+                🎓 En la Universidad
+              </button>
+            </div>
+          </div>
+
+          <button type="button" id="btn-guardar-perfil-univ" class="btn-sec-primario-sm" style="margin-top: 12px; width: 100%;">
+            💾 Guardar mis datos universitarios
+          </button>
         </div>
       </div>
 

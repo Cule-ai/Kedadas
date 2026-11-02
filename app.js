@@ -354,6 +354,9 @@ function concederAcceso(nombreUsuario, rolAdmin) {
   cargarChatInicial();
   setTimeout(cargarVotaciones, 300);
   inicializarPushNotifications();
+  if (typeof window.cargarDatosUniversitariosEnPerfil === 'function') {
+    window.cargarDatosUniversitariosEnPerfil();
+  }
 }
 
 // --- 3. GESTIÓN DINÁMICA DE USUARIOS Y PINS (DUAL SUPABASE + LOCAL) ---
@@ -361,14 +364,17 @@ const STORAGE_PERFILES_KEY = 'kedadas_perfiles_v2';
 const STORAGE_USUARIOS_KEY = 'listaUsuarios';
 
 const PERFILES_DEFECTO = [
-  { id: 'Cule', nombre: 'Cule', pin: '1234', rol: 'admin' },
-  { id: 'Persona 2', nombre: 'Persona 2', pin: '0000', rol: 'usuario' },
-  { id: 'Persona 3', nombre: 'Persona 3', pin: '0000', rol: 'usuario' },
-  { id: 'Persona 4', nombre: 'Persona 4', pin: '0000', rol: 'usuario' }
+  { id: 'Cule', nombre: 'Cule', pin: '1234', rol: 'admin', es_universitario: false, ciudad_origen: 'Toledo', ciudad_universidad: 'Madrid', ubicacion_actual: 'origen' },
+  { id: 'Persona 2', nombre: 'Persona 2', pin: '0000', rol: 'usuario', es_universitario: true, ciudad_origen: 'Toledo', ciudad_universidad: 'Madrid', ubicacion_actual: 'universidad' },
+  { id: 'Persona 3', nombre: 'Persona 3', pin: '0000', rol: 'usuario', es_universitario: false, ciudad_origen: 'Toledo', ciudad_universidad: '', ubicacion_actual: 'origen' },
+  { id: 'Persona 4', nombre: 'Persona 4', pin: '0000', rol: 'usuario', es_universitario: false, ciudad_origen: 'Toledo', ciudad_universidad: '', ubicacion_actual: 'origen' }
 ];
 
 let listaPerfiles = [];
 let usuarios = ['Cule', 'Persona 2', 'Persona 3', 'Persona 4'];
+
+// Variable para el filtro de coincidencia según lugar de quedada ('todos' | 'origen' | 'universidad')
+let filtroLugarQuedada = 'todos';
 
 // Elementos del panel desplegable en línea
 const flechaDesplegableUsuarios = document.getElementById('flecha-desplegable-usuarios');
@@ -457,12 +463,20 @@ async function cargarUsuariosDesdeBD() {
         if (local) {
           if (dbPerfil.pin) local.pin = dbPerfil.pin;
           if (dbPerfil.rol) local.rol = dbPerfil.rol;
+          if (dbPerfil.es_universitario !== undefined) local.es_universitario = dbPerfil.es_universitario;
+          if (dbPerfil.ciudad_origen) local.ciudad_origen = dbPerfil.ciudad_origen;
+          if (dbPerfil.ciudad_universidad) local.ciudad_universidad = dbPerfil.ciudad_universidad;
+          if (dbPerfil.ubicacion_actual) local.ubicacion_actual = dbPerfil.ubicacion_actual;
         } else {
           listaPerfiles.push({
             id: dbPerfil.id || dbPerfil.nombre,
             nombre: dbPerfil.nombre,
             pin: dbPerfil.pin || '0000',
-            rol: dbPerfil.rol || 'usuario'
+            rol: dbPerfil.rol || 'usuario',
+            es_universitario: !!dbPerfil.es_universitario,
+            ciudad_origen: dbPerfil.ciudad_origen || 'Toledo',
+            ciudad_universidad: dbPerfil.ciudad_universidad || '',
+            ubicacion_actual: dbPerfil.ubicacion_actual || 'origen'
           });
         }
       });
@@ -768,6 +782,79 @@ function renderizarPanelGestionUsuarios() {
   });
 }
 
+function alternarUbicacionUsuario(nombreUsuario) {
+  const perfil = listaPerfiles.find(p => p.nombre.toLowerCase() === (nombreUsuario || '').toLowerCase());
+  if (!perfil) return;
+  perfil.ubicacion_actual = (perfil.ubicacion_actual === 'universidad') ? 'origen' : 'universidad';
+  guardarPerfilesLocales();
+  try {
+    supabaseApp.from('perfiles').update({ ubicacion_actual: perfil.ubicacion_actual }).eq('nombre', perfil.nombre);
+  } catch(e) {}
+  renderizarFiltroCoincidencias();
+  if (typeof window.cargarDatosUniversitariosEnPerfil === 'function') {
+    window.cargarDatosUniversitariosEnPerfil();
+  }
+}
+
+function renderizarBannerUbicacionUniversitarios() {
+  const banner = document.getElementById('banner-estado-ubicaciones-grupo');
+  const badgeContador = document.getElementById('badge-contador-univ');
+  if (!banner) return;
+
+  const seleccionados = Array.from(usuariosSeleccionadosCoincidencias);
+  const univsEnGrupo = seleccionados
+    .map(u => listaPerfiles.find(p => p.nombre.toLowerCase() === u.toLowerCase()))
+    .filter(p => p && p.es_universitario);
+
+  const enUniv = univsEnGrupo.filter(p => p.ubicacion_actual === 'universidad');
+  const enOrigen = seleccionados.filter(u => {
+    const p = listaPerfiles.find(item => item.nombre.toLowerCase() === u.toLowerCase());
+    return !p || !p.es_universitario || p.ubicacion_actual !== 'universidad';
+  });
+
+  if (badgeContador) {
+    badgeContador.textContent = `${enUniv.length} en la universidad`;
+  }
+
+  if (univsEnGrupo.length === 0) {
+    banner.innerHTML = `📍 <strong>Situación actual:</strong> Todos los miembros seleccionados residen en su ciudad de origen.`;
+  } else {
+    const strUniv = enUniv.length > 0 
+      ? enUniv.map(p => `<strong>${p.nombre}</strong> (${p.ciudad_universidad || 'Universidad'})`).join(', ')
+      : '<em style="color:#64748b;">Ninguno</em>';
+    const strOrigen = enOrigen.length > 0 
+      ? enOrigen.map(u => `<strong>${u}</strong>`).join(', ')
+      : '<em style="color:#64748b;">Ninguno</em>';
+
+    let sugerenciaFiltro = '';
+    if (filtroLugarQuedada === 'origen') {
+      sugerenciaFiltro = `<div style="margin-top: 5px; color: #047857;">🏠 <strong>Filtro activo:</strong> Quedada en Ciudad de Origen. Si libran, los que estudian fuera bajarán a reunirse con el grupo.</div>`;
+    } else if (filtroLugarQuedada === 'universidad') {
+      sugerenciaFiltro = `<div style="margin-top: 5px; color: #4338ca;">🎒 <strong>Filtro activo:</strong> Escapada a la Universidad. El grupo viajará a visitar a los que estudian fuera.</div>`;
+    } else {
+      sugerenciaFiltro = `<div style="margin-top: 5px; color: #64748b;">🌍 <strong>Filtro activo:</strong> Cualquier sitio (te aconsejaremos el mejor punto según la mayoría).</div>`;
+    }
+
+    banner.innerHTML = `
+      <div>🏠 <strong>En Ciudad de Origen:</strong> ${strOrigen}</div>
+      <div style="margin-top: 4px;">🎓 <strong>En la Universidad:</strong> ${strUniv}</div>
+      ${sugerenciaFiltro}
+    `;
+  }
+}
+
+function inicializarSelectorLugarQuedada() {
+  const botones = document.querySelectorAll('#selector-lugar-quedada-grid .btn-filtro-lugar');
+  botones.forEach(btn => {
+    btn.addEventListener('click', () => {
+      botones.forEach(b => b.classList.remove('activo'));
+      btn.classList.add('activo');
+      filtroLugarQuedada = btn.dataset.lugar || 'todos';
+      renderizarBannerUbicacionUniversitarios();
+    });
+  });
+}
+
 function renderizarFiltroCoincidencias() {
   if (!listaFiltroCoincidencias) return;
   listaFiltroCoincidencias.innerHTML = '';
@@ -799,12 +886,34 @@ function renderizarFiltroCoincidencias() {
         usuariosSeleccionadosCoincidencias.delete(u);
         label.classList.remove('activo');
       }
+      renderizarBannerUbicacionUniversitarios();
     });
 
     label.appendChild(check);
     label.appendChild(document.createTextNode(u));
+
+    // Si es universitario, añadir chip interactivo de ubicación
+    const perfil = listaPerfiles.find(p => p.nombre.toLowerCase() === u.toLowerCase());
+    if (perfil && perfil.es_universitario) {
+      const ubiPill = document.createElement('span');
+      const estaEnUniv = (perfil.ubicacion_actual === 'universidad');
+      ubiPill.className = `chip-univ-pill ${estaEnUniv ? 'en-univ' : 'en-origen'}`;
+      ubiPill.textContent = estaEnUniv 
+        ? `🎓 Univ${perfil.ciudad_universidad ? ': ' + perfil.ciudad_universidad : ''}` 
+        : `🏠 En Origen`;
+      ubiPill.title = 'Toca para cambiar si está en origen o en la universidad';
+      ubiPill.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        alternarUbicacionUsuario(u);
+      });
+      label.appendChild(ubiPill);
+    }
+
     listaFiltroCoincidencias.appendChild(label);
   });
+
+  renderizarBannerUbicacionUniversitarios();
 }
 
 if (btnSelTodos) {
@@ -2421,14 +2530,76 @@ btnCoincidencias.addEventListener('click', async () => {
 
   const nombresGrupo = seleccionados.join(', ');
   if (diasComunes.length === 0) {
-    resultadoCoincidencias.innerHTML = `😅 <strong>No hay coincidencias.</strong><br>Ningún día libráis todos a la vez (<strong>${nombresGrupo}</strong>) este mes en el grupo <strong>${grupoActivo}</strong>.`;
+    resultadoCoincidencias.innerHTML = `😅 <strong>No hay coincidencias de días libres.</strong><br>Ningún día libráis todos a la vez (<strong>${nombresGrupo}</strong>) este mes en el grupo <strong>${grupoActivo}</strong>.`;
   } else {
+    // Análisis inteligente de universitarios y lugar de quedada
+    const univsSeleccionados = seleccionados
+      .map(u => listaPerfiles.find(p => p.nombre.toLowerCase() === u.toLowerCase()))
+      .filter(p => p && p.es_universitario);
+
+    const univsFuera = univsSeleccionados.filter(p => p.ubicacion_actual === 'universidad');
+    const miembrosOrigen = seleccionados.filter(u => {
+      const p = listaPerfiles.find(item => item.nombre.toLowerCase() === u.toLowerCase());
+      return !p || !p.es_universitario || p.ubicacion_actual !== 'universidad';
+    });
+
+    let lugarRecomendado = 'Ciudad de Origen';
+    let descripcionLugar = '';
+    let planTituloSugerido = '';
+
+    if (filtroLugarQuedada === 'universidad') {
+      if (univsFuera.length > 0) {
+        const ciudadDestino = univsFuera[0].ciudad_universidad || 'la Universidad';
+        lugarRecomendado = `🎓 En ${ciudadDestino}`;
+        descripcionLugar = `🎒 <strong>¡Escapada Universitaria!</strong><br>Los miembros en origen (<strong>${miembrosOrigen.join(', ')}</strong>) podéis viajar a visitar a <strong>${univsFuera.map(p => p.nombre).join(', ')}</strong> en <strong>${ciudadDestino}</strong> para celebrar la quedada en su zona universitaria.`;
+        planTituloSugerido = `🎒 Escapada universitaria a ${ciudadDestino} (Día ${diasComunes[0]})`;
+      } else {
+        lugarRecomendado = `🏠 En Ciudad de Origen`;
+        descripcionLugar = `Habías seleccionado quedar en la universidad, pero actualmente todos los miembros elegidos se encuentran en su ciudad de origen. ¡Podéis quedar en los sitios de siempre!`;
+        planTituloSugerido = `🍻 Kedada en Ciudad de Origen (Día ${diasComunes[0]})`;
+      }
+    } else if (filtroLugarQuedada === 'origen') {
+      lugarRecomendado = `🏠 En Ciudad de Origen`;
+      if (univsFuera.length === 0) {
+        descripcionLugar = `✅ <strong>¡Pleno en casa!</strong><br>Todos los miembros seleccionados residen o se encuentran en su ciudad de origen. No hay desplazamientos largos necesarios.`;
+      } else {
+        descripcionLugar = `🚗 <strong>Quedada en Ciudad de Origen:</strong><br>Los universitarios que están fuera (<strong>${univsFuera.map(p => `${p.nombre} en ${p.ciudad_universidad || 'Campus'}`).join(', ')}</strong>) tendrían que bajar a su ciudad de origen para reuniros todos en estas fechas.`;
+      }
+      planTituloSugerido = `🍻 Kedada en Ciudad de Origen (Día ${diasComunes[0]})`;
+    } else {
+      // 'todos' (Cualquier sitio)
+      if (univsFuera.length === 0) {
+        lugarRecomendado = `🏠 En Ciudad de Origen`;
+        descripcionLugar = `Todos los seleccionados están en su ciudad de origen. El punto de encuentro idóneo es vuestra localidad habitual.`;
+        planTituloSugerido = `🍻 Kedada en Ciudad de Origen (Día ${diasComunes[0]})`;
+      } else {
+        const ciudadDestino = univsFuera[0].ciudad_universidad || 'la Universidad';
+        lugarRecomendado = `⚖️ Origen o Visita a ${ciudadDestino}`;
+        descripcionLugar = `Hay miembros en origen (<strong>${miembrosOrigen.join(', ')}</strong>) y miembros estudiando fuera (<strong>${univsFuera.map(p => `${p.nombre} en ${p.ciudad_universidad || 'Campus'}`).join(', ')}</strong>).<br>Podéis acordar si bajan a origen o si el grupo sube a ${ciudadDestino} a pasar el día.`;
+        planTituloSugerido = `🎯 Votar: ¿Quedar en Origen o ir a ${ciudadDestino}?`;
+      }
+    }
+
     resultadoCoincidencias.innerHTML = `
-      🎉 <strong>¡Días libres en común en ${grupoActivo}!</strong><br>
-      Coincidís (<strong>${nombresGrupo}</strong>) los días: <strong>${diasComunes.join(', ')}</strong> de ${nombresMeses[fechaNavegacion.getMonth()]}<br>
-      <button type="button" class="btn-sec-primario-sm btn-destacado-guardar" style="margin-top: 10px; cursor: pointer;" onclick="document.getElementById('seccion-votaciones').scrollIntoView({behavior: 'smooth'})">
-        🎯 Ver planes y votar qué hacer ➔
-      </button>
+      <div style="font-size: 1.05rem; font-weight: 800; color: #065f46; margin-bottom: 6px;">
+        🎉 ¡Días libres en común en ${grupoActivo}!
+      </div>
+      <div style="font-size: 0.92rem; color: #1e293b; margin-bottom: 8px;">
+        Coincidís libres (<strong>${nombresGrupo}</strong>) los días: 
+        <strong style="font-size: 1.12rem; color: #4f46e5;">${diasComunes.join(', ')}</strong> de ${nombresMeses[fechaNavegacion.getMonth()]}
+      </div>
+      
+      <!-- Tarjeta de Punto de Encuentro y Universitarios -->
+      <div class="recom-quedada-box">
+        <div class="recom-quedada-header">
+          <span class="recom-quedada-title">📍 Punto de Encuentro Recomendado</span>
+          <span class="recom-quedada-lugar-badge">${lugarRecomendado}</span>
+        </div>
+        <div class="recom-quedada-desc">${descripcionLugar}</div>
+        <button type="button" class="btn-proponer-plan-kdd" onclick="proponerPlanDesdeCoincidencia('${planTituloSugerido.replace(/'/g, "\\'")}')">
+          🎯 Crear propuesta en Votaciones del Grupo ➔
+        </button>
+      </div>
     `;
     
     const duration = 3 * 1000;
@@ -4218,6 +4389,10 @@ window.addEventListener('DOMContentLoaded', async () => {
   await cargarGruposDesdeBD();
   await cargarUsuariosDesdeBD();
 
+  // Inicializar filtros y controles para universitarios y puntos de encuentro
+  inicializarSelectorLugarQuedada();
+  inicializarModoUniversitarioPerfil();
+
   try {
     const { data: { session } } = await supabaseApp.auth.getSession();
     if (session && session.user) {
@@ -4243,6 +4418,108 @@ window.addEventListener('DOMContentLoaded', async () => {
   // Detectar automáticamente si se ha abierto un enlace de invitación (?unirse=KED-XXXX)
   comprobarParametroInvitacionUrl();
 });
+
+// Inicializa el formulario del perfil para modo universitario
+function inicializarModoUniversitarioPerfil() {
+  const checkUniv = document.getElementById('check-es-universitario');
+  const cajaCampos = document.getElementById('caja-campos-universitario');
+  const inputOrigen = document.getElementById('input-ciudad-origen');
+  const inputUniv = document.getElementById('input-ciudad-univ');
+  const btnUbiOrigen = document.getElementById('btn-ubicacion-origen');
+  const btnUbiUniv = document.getElementById('btn-ubicacion-univ');
+  const btnGuardarUniv = document.getElementById('btn-guardar-perfil-univ');
+
+  let ubicacionSeleccionada = 'origen';
+
+  function cargarDatosEnFormulario() {
+    const usuarioABuscar = miUsuario || usuarioLogueado || 'Cule';
+    const miPerfil = listaPerfiles.find(p => p.nombre.toLowerCase() === usuarioABuscar.toLowerCase());
+    if (!miPerfil) return;
+    const esUniv = !!miPerfil.es_universitario;
+    if (checkUniv) checkUniv.checked = esUniv;
+    if (cajaCampos) cajaCampos.style.display = esUniv ? 'block' : 'none';
+    if (inputOrigen) inputOrigen.value = miPerfil.ciudad_origen || 'Toledo';
+    if (inputUniv) inputUniv.value = miPerfil.ciudad_universidad || '';
+    
+    ubicacionSeleccionada = miPerfil.ubicacion_actual || 'origen';
+    if (btnUbiOrigen && btnUbiUniv) {
+      btnUbiOrigen.classList.toggle('activo', ubicacionSeleccionada === 'origen');
+      btnUbiUniv.classList.toggle('activo', ubicacionSeleccionada === 'universidad');
+    }
+  }
+
+  if (checkUniv) {
+    checkUniv.addEventListener('change', () => {
+      if (cajaCampos) cajaCampos.style.display = checkUniv.checked ? 'block' : 'none';
+    });
+  }
+
+  if (btnUbiOrigen) {
+    btnUbiOrigen.addEventListener('click', () => {
+      ubicacionSeleccionada = 'origen';
+      btnUbiOrigen.classList.add('activo');
+      if (btnUbiUniv) btnUbiUniv.classList.remove('activo');
+    });
+  }
+  if (btnUbiUniv) {
+    btnUbiUniv.addEventListener('click', () => {
+      ubicacionSeleccionada = 'universidad';
+      btnUbiUniv.classList.add('activo');
+      if (btnUbiOrigen) btnUbiOrigen.classList.remove('activo');
+    });
+  }
+
+  if (btnGuardarUniv) {
+    btnGuardarUniv.addEventListener('click', async () => {
+      const usuarioABuscar = miUsuario || usuarioLogueado || 'Cule';
+      const miPerfil = listaPerfiles.find(p => p.nombre.toLowerCase() === usuarioABuscar.toLowerCase());
+      if (!miPerfil) return;
+      miPerfil.es_universitario = checkUniv ? checkUniv.checked : false;
+      miPerfil.ciudad_origen = inputOrigen ? inputOrigen.value.trim() : 'Toledo';
+      miPerfil.ciudad_universidad = inputUniv ? inputUniv.value.trim() : '';
+      miPerfil.ubicacion_actual = ubicacionSeleccionada;
+
+      guardarPerfilesLocales();
+
+      try {
+        btnGuardarUniv.textContent = 'Guardando...';
+        await supabaseApp.from('perfiles').update({
+          es_universitario: miPerfil.es_universitario,
+          ciudad_origen: miPerfil.ciudad_origen,
+          ciudad_universidad: miPerfil.ciudad_universidad,
+          ubicacion_actual: miPerfil.ubicacion_actual
+        }).eq('nombre', miPerfil.nombre);
+        btnGuardarUniv.textContent = '💾 Guardar mis datos universitarios';
+        alert(`✅ Datos universitarios de ${miPerfil.nombre} guardados correctamente.`);
+      } catch(e) {
+        btnGuardarUniv.textContent = '💾 Guardar mis datos universitarios';
+      }
+
+      renderizarFiltroCoincidencias();
+      renderizarBannerUbicacionUniversitarios();
+    });
+  }
+
+  cargarDatosEnFormulario();
+  window.cargarDatosUniversitariosEnPerfil = cargarDatosEnFormulario;
+}
+
+// Permite proponer directamente un plan sugerido de punto de encuentro al muro de votaciones
+window.proponerPlanDesdeCoincidencia = function(titulo) {
+  const inputNuevoPlan = document.getElementById('input-nuevo-plan');
+  const btnNuevoPlanDesplegar = document.getElementById('btn-nuevo-plan-desplegar');
+  const formNuevoPlan = document.getElementById('form-nuevo-plan');
+  const tabBtnPlanes = document.querySelector('.nav-tab-btn[data-tab="planes"]');
+
+  if (tabBtnPlanes) tabBtnPlanes.click();
+  if (formNuevoPlan) formNuevoPlan.style.display = 'block';
+  if (inputNuevoPlan) {
+    inputNuevoPlan.value = titulo;
+    inputNuevoPlan.focus();
+  }
+  const seccionVotaciones = document.getElementById('seccion-votaciones');
+  if (seccionVotaciones) seccionVotaciones.scrollIntoView({ behavior: 'smooth' });
+};
 
 // Comprueba si la URL contiene un código de invitación y solicita unirse al grupo
 function comprobarParametroInvitacionUrl() {
