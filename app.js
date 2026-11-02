@@ -470,17 +470,18 @@ async function cargarUsuariosDesdeBD() {
 
 // Actualizar todos los selectores desplegables de usuarios de la aplicación
 function renderizarSelectoresUsuarios() {
-  // Selector en pantalla de login
-  if (loginUsuario) {
-    const valActual = loginUsuario.value;
-    loginUsuario.innerHTML = '';
+  // Selector en pantalla de login (si existiera elemento legado)
+  const elLoginUsuario = document.getElementById('login-usuario');
+  if (elLoginUsuario) {
+    const valActual = elLoginUsuario.value;
+    elLoginUsuario.innerHTML = '';
     usuarios.forEach(u => {
       const opt = document.createElement('option');
       opt.value = u;
       opt.textContent = u;
-      loginUsuario.appendChild(opt);
+      elLoginUsuario.appendChild(opt);
     });
-    if (usuarios.includes(valActual)) loginUsuario.value = valActual;
+    if (usuarios.includes(valActual)) elLoginUsuario.value = valActual;
   }
 
   // Selector en pantalla principal de la app (Solo miembros del grupo activo)
