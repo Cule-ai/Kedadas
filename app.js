@@ -819,8 +819,6 @@ if (btnTopPersonas) {
   });
 }
 
-}
-
 // Eliminar persona seleccionada en el desplegable
 if (btnBorrarPersonaDesplegable) {
   btnBorrarPersonaDesplegable.addEventListener('click', async () => {
@@ -2017,6 +2015,81 @@ if (btnCancelarCambiosHorario) {
   });
 }
 
+// ========================================================
+// SISTEMA DE FESTIVOS NACIONALES DE ESPAÑA (BOE / LABORAL)
+// ========================================================
+function calcularDomingoResurreccion(year) {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31) - 1; // 0-indexado (2 = marzo, 3 = abril)
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(year, month, day);
+}
+
+function obtenerFestivosNacionalesAnio(year) {
+  const festivosFijos = [
+    { mes: 0, dia: 1, nombre: 'Año Nuevo' },
+    { mes: 0, dia: 6, nombre: 'Epifanía del Señor (Reyes Magos)' },
+    { mes: 4, dia: 1, nombre: 'Fiesta del Trabajo' },
+    { mes: 7, dia: 15, nombre: 'Asunción de la Virgen' },
+    { mes: 9, dia: 12, nombre: 'Fiesta Nacional de España' },
+    { mes: 10, dia: 1, nombre: 'Todos los Santos' },
+    { mes: 11, dia: 6, nombre: 'Día de la Constitución Española' },
+    { mes: 11, dia: 8, nombre: 'Inmaculada Concepción' },
+    { mes: 11, dia: 25, nombre: 'Natividad del Señor (Navidad)' }
+  ];
+
+  const festivos = {};
+
+  festivosFijos.forEach(f => {
+    const dt = new Date(year, f.mes, f.dia);
+    festivos[`${f.mes}-${f.dia}`] = { nombre: f.nombre, esTraslado: false };
+    
+    // Si cae en domingo, en el calendario laboral español suele trasladarse al lunes siguiente
+    if (dt.getDay() === 0) {
+      const lunes = new Date(year, f.mes, f.dia + 1);
+      festivos[`${lunes.getMonth()}-${lunes.getDate()}`] = {
+        nombre: `Lunes posterior a ${f.nombre} (traslado festivo)`,
+        esTraslado: true
+      };
+    }
+  });
+
+  // Semana Santa (Viernes Santo y Jueves Santo)
+  const domingoRes = calcularDomingoResurreccion(year);
+  
+  const juevesSanto = new Date(domingoRes);
+  juevesSanto.setDate(domingoRes.getDate() - 3);
+  festivos[`${juevesSanto.getMonth()}-${juevesSanto.getDate()}`] = {
+    nombre: 'Jueves Santo',
+    esTraslado: false
+  };
+
+  const viernesSanto = new Date(domingoRes);
+  viernesSanto.setDate(domingoRes.getDate() - 2);
+  festivos[`${viernesSanto.getMonth()}-${viernesSanto.getDate()}`] = {
+    nombre: 'Viernes Santo',
+    esTraslado: false
+  };
+
+  return festivos;
+}
+
+function obtenerFestivoNacional(dia, mes, anio) {
+  const festivos = obtenerFestivosNacionalesAnio(anio);
+  return festivos[`${mes}-${dia}`] || null;
+}
+
 async function iniciarCalendario() {
   actualizarBannerGrupo();
   if (modoVista === 'mes') await renderizarMes();
@@ -2072,9 +2145,19 @@ async function renderizarMes() {
     const dayCell = document.createElement('div');
     const pendiente = cambiosHorarioPendientes[i];
     let indice = pendiente !== undefined ? pendiente : (historial[i] !== undefined ? historial[i] : 0);
+    const festivo = obtenerFestivoNacional(i, mes, anio);
     
-    dayCell.className = `day ${estados[indice].clase} ${pendiente !== undefined ? 'dia-modificado-pendiente' : ''}`;
-    dayCell.innerHTML = `<span class="day-number">${i}</span><span class="shift-label">${estados[indice].texto}</span>`;
+    dayCell.className = `day ${estados[indice].clase} ${pendiente !== undefined ? 'dia-modificado-pendiente' : ''} ${festivo ? 'dia-festivo-nacional' : ''}`;
+    if (festivo) {
+      dayCell.setAttribute('data-festivo', festivo.nombre);
+      dayCell.title = `🎉 Festivo nacional: ${festivo.nombre}`;
+    }
+
+    dayCell.innerHTML = `
+      ${festivo ? `<span class="festivo-tag" title="🎉 Festivo: ${escapeHtml(festivo.nombre)}">★</span>` : ''}
+      <span class="day-number">${i}</span>
+      <span class="shift-label">${estados[indice].texto}</span>
+    `;
 
     dayCell.addEventListener('click', () => {
       if (!esAdmin && miUsuario !== usuarioLogueado) return alert('Solo puedes editar tus turnos.');
@@ -2086,13 +2169,50 @@ async function renderizarMes() {
       let nuevoEstado = (estadoActual + 1) % estados.length;
       cambiosHorarioPendientes[i] = nuevoEstado;
 
-      dayCell.className = `day ${estados[nuevoEstado].clase} dia-modificado-pendiente`;
-      dayCell.innerHTML = `<span class="day-number">${i}</span><span class="shift-label">${estados[nuevoEstado].texto}</span>`;
+      dayCell.className = `day ${estados[nuevoEstado].clase} ${festivo ? 'dia-festivo-nacional' : ''} dia-modificado-pendiente`;
+      dayCell.innerHTML = `
+        ${festivo ? `<span class="festivo-tag" title="🎉 Festivo: ${escapeHtml(festivo.nombre)}">★</span>` : ''}
+        <span class="day-number">${i}</span>
+        <span class="shift-label">${estados[nuevoEstado].texto}</span>
+      `;
 
       actualizarBarraCambiosPendientes();
     });
 
     calendarGrid.appendChild(dayCell);
+  }
+
+  // Actualizar tarjeta resumen de festivos nacionales de este mes
+  const contenedorFestivos = document.getElementById('festivos-mes-info');
+  if (contenedorFestivos) {
+    const festivosDelMes = [];
+    for (let d = 1; d <= diasEnElMes; d++) {
+      const f = obtenerFestivoNacional(d, mes, anio);
+      if (f) festivosDelMes.push({ dia: d, ...f });
+    }
+
+    if (festivosDelMes.length > 0) {
+      contenedorFestivos.style.display = 'block';
+      contenedorFestivos.innerHTML = `
+        <div class="festivos-mes-card">
+          <div class="festivos-mes-header">
+            <span class="festivos-icono">🎉</span>
+            <span class="festivos-titulo">Festivos en ${nombresMeses[mes]} ${anio} (${festivosDelMes.length}):</span>
+          </div>
+          <div class="festivos-mes-badges">
+            ${festivosDelMes.map(f => `
+              <div class="festivo-badge-pill" title="Festivo nacional: ${escapeHtml(f.nombre)}">
+                <span class="festivo-badge-dia">${f.dia} ${nombresMeses[mes]}</span>
+                <span class="festivo-badge-nombre">${escapeHtml(f.nombre)}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    } else {
+      contenedorFestivos.style.display = 'none';
+      contenedorFestivos.innerHTML = '';
+    }
   }
 
   actualizarBarraCambiosPendientes();
@@ -2134,6 +2254,20 @@ async function renderizarAno() {
     historialAno[m][dato.dia] = dato.indiceEstado;
   });
 
+  // Leyenda en la vista anual
+  const leyendaAnual = document.createElement('div');
+  leyendaAnual.className = 'leyenda';
+  leyendaAnual.style.marginBottom = '15px';
+  leyendaAnual.innerHTML = `
+    <div class="leyenda-item"><span class="leyenda-color estado-libre">L</span> Libre</div>
+    <div class="leyenda-item"><span class="leyenda-color estado-manana">M</span> Mañana</div>
+    <div class="leyenda-item"><span class="leyenda-color estado-tarde">T</span> Tarde</div>
+    <div class="leyenda-item"><span class="leyenda-color estado-noche">N</span> Noche</div>
+    <div class="leyenda-item"><span class="leyenda-color estado-vacaciones">V</span> Vacaciones</div>
+    <div class="leyenda-item"><span class="leyenda-color festivo-color">★</span> Festivo nacional</div>
+  `;
+  vistaAnualContainer.appendChild(leyendaAnual);
+
   const gridAnual = document.createElement('div');
   gridAnual.className = 'vista-anual-grid';
 
@@ -2159,8 +2293,12 @@ async function renderizarAno() {
     for (let dia = 1; dia <= diasEnMes; dia++) {
       const dayCell = document.createElement('div');
       let indice = historialAno[mes][dia] !== undefined ? historialAno[mes][dia] : 0;
+      const festivo = obtenerFestivoNacional(dia, mes, anio);
       
-      dayCell.className = `mini-day ${estados[indice].clase}`;
+      dayCell.className = `mini-day ${estados[indice].clase} ${festivo ? 'mini-dia-festivo' : ''}`;
+      if (festivo) {
+        dayCell.title = `${dia} de ${nombresMeses[mes]}: 🎉 Festivo (${festivo.nombre})`;
+      }
       dayCell.textContent = dia;
 
       dayCell.addEventListener('click', async () => {
@@ -2169,7 +2307,7 @@ async function renderizarAno() {
         const confirmacion = confirm(`¿Cambiar el día ${dia} de ${nombresMeses[mes]} a "${estados[nuevoIndice].texto || 'Vacío'}"?`);
         if (confirmacion) {
           indice = nuevoIndice;
-          dayCell.className = `mini-day ${estados[indice].clase}`;
+          dayCell.className = `mini-day ${estados[indice].clase} ${festivo ? 'mini-dia-festivo' : ''}`;
           await guardarTurnoNube(dia, indice, `${anio}-${mes}`);
         }
       });
@@ -2325,13 +2463,21 @@ btnCoincidencias.addEventListener('click', async () => {
       }
     }
 
+    const diasComunesFormateados = diasComunes.map(dia => {
+      const festivo = obtenerFestivoNacional(dia, mesIndex, anio);
+      if (festivo) {
+        return `<span class="dia-coincidencia-festivo" title="🎉 ¡Festivo nacional: ${escapeHtml(festivo.nombre)}!">${dia} (🎉 ${escapeHtml(festivo.nombre)})</span>`;
+      }
+      return `${dia}`;
+    }).join(', ');
+
     resultadoCoincidencias.innerHTML = `
       <div style="font-size: 1.05rem; font-weight: 800; color: #065f46; margin-bottom: 6px;">
         🎉 ¡Días libres en común en ${escapeHtml(grupoActivo)}!
       </div>
       <div style="font-size: 0.92rem; color: #1e293b; margin-bottom: 8px;">
         Coincidís libres (<strong>${escapeHtml(nombresGrupo)}</strong>) los días: 
-        <strong style="font-size: 1.12rem; color: #4f46e5;">${diasComunes.join(', ')}</strong> de ${nombresMeses[fechaNavegacion.getMonth()]}
+        <strong style="font-size: 1.12rem; color: #4f46e5;">${diasComunesFormateados}</strong> de ${nombresMeses[fechaNavegacion.getMonth()]}
       </div>
       
       <!-- Tarjeta de Punto de Encuentro y Universitarios -->

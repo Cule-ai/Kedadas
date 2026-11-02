@@ -124,6 +124,7 @@ body {
 .day {
   aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
   border-radius: 12px; cursor: pointer; border: 2px solid transparent; transition: all 0.1s;
+  position: relative;
 }
 .day:active { transform: scale(0.85); }
 
@@ -138,6 +139,88 @@ body {
 .estado-noche  { background-color: #f3e8ff; color: #6b21a8; border-color: #e9d5ff; }
 .estado-vacaciones { background-color: #ffedd5; color: #c2410c; border-color: #fdba74; }
 
+/* FESTIVOS NACIONALES */
+.day.dia-festivo-nacional {
+  border-color: rgba(239, 68, 68, 0.45);
+}
+.day.dia-festivo-nacional .day-number {
+  color: #dc2626;
+  font-weight: 900;
+}
+.festivo-tag {
+  position: absolute;
+  top: 3px;
+  left: 4px;
+  font-size: 0.65rem;
+  line-height: 1;
+  color: #dc2626;
+  font-weight: 900;
+  pointer-events: none;
+  text-shadow: 0 1px 2px rgba(220, 38, 38, 0.2);
+}
+.leyenda-color.festivo-color {
+  background: #fee2e2;
+  color: #dc2626;
+  border: 1.5px solid #fca5a5;
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+.festivos-mes-info {
+  margin: 10px 0 18px 0;
+}
+.festivos-mes-card {
+  background: linear-gradient(135deg, rgba(254, 242, 242, 0.95), rgba(255, 241, 242, 0.9));
+  border: 1.5px solid #fecaca;
+  border-radius: 14px;
+  padding: 10px 14px;
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.06);
+}
+.festivos-mes-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: #991b1b;
+  margin-bottom: 8px;
+}
+.festivos-mes-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.festivo-badge-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #ffffff;
+  border: 1px solid #fca5a5;
+  border-radius: 20px;
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04);
+}
+.festivo-badge-dia {
+  background: #ef4444;
+  color: #ffffff;
+  padding: 2px 7px;
+  border-radius: 10px;
+  font-weight: 800;
+  font-size: 0.72rem;
+}
+.festivo-badge-nombre {
+  font-weight: 700;
+  color: #7f1d1d;
+}
+.dia-coincidencia-festivo {
+  background: #fee2e2;
+  color: #b91c1c;
+  padding: 2px 6px;
+  border-radius: 6px;
+  border: 1px solid #fca5a5;
+  font-weight: 800;
+}
+
 /* --- DISEÑO VISTA ANUAL --- */
 .vista-anual-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-bottom: 20px; }
 .mini-mes { background: #f8fafc; padding: 10px; border-radius: 12px; border: 1px solid #e2e8f0; }
@@ -146,6 +229,11 @@ body {
 .mini-days-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
 .mini-day { aspect-ratio: 1; display: flex; align-items: center; justify-content: center; font-size: 0.65rem; font-weight: bold; border-radius: 4px; cursor: pointer; border: 1px solid transparent; }
 .mini-day:active { transform: scale(0.8); }
+.mini-day.mini-dia-festivo {
+  border: 1.5px solid #ef4444 !important;
+  color: #dc2626 !important;
+  font-weight: 900 !important;
+}
 
 .resultados-box { margin-top: -10px; margin-bottom: 20px; padding: 15px; background: #f0fdf4; color: #166534; border-radius: 12px; border: 2px solid #bbf7d0; text-align: center; display: none; font-size: 0.95rem; }
 .resultados-box.visible { display: block; }
@@ -299,6 +387,16 @@ body.dark-theme .estado-manana { background-color: #1e3a8a; color: #dbeafe; bord
 body.dark-theme .estado-tarde { background-color: #713f12; color: #fef08a; border-color: #ca8a04; }
 body.dark-theme .estado-noche { background-color: #4c1d95; color: #f3e8ff; border-color: #7c3aed; }
 body.dark-theme .estado-vacaciones { background-color: #9a3412; color: #ffedd5; border-color: #ea580c; }
+body.dark-theme .day.dia-festivo-nacional { border-color: rgba(248, 113, 113, 0.6) !important; }
+body.dark-theme .day.dia-festivo-nacional .day-number { color: #fca5a5 !important; }
+body.dark-theme .festivo-tag { color: #f87171; text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6); }
+body.dark-theme .mini-day.mini-dia-festivo { border-color: #f87171 !important; color: #fca5a5 !important; }
+body.dark-theme .leyenda-color.festivo-color { background-color: rgba(239, 68, 68, 0.25); color: #fca5a5; border-color: rgba(239, 68, 68, 0.5); }
+body.dark-theme .festivos-mes-card { background: rgba(153, 27, 27, 0.25); border-color: rgba(239, 68, 68, 0.4); }
+body.dark-theme .festivos-mes-header { color: #fca5a5; }
+body.dark-theme .festivo-badge-pill { background: #1e293b; border-color: #7f1d1d; }
+body.dark-theme .festivo-badge-nombre { color: #fecaca; }
+body.dark-theme .dia-coincidencia-festivo { background: rgba(239, 68, 68, 0.3); color: #fecaca; border-color: #991b1b; }
 body.dark-theme .resultados-box { background: #064e3b; color: #dcfce7; border-color: #059669; }
 body.dark-theme .login-container h2, body.dark-theme .calendar-header h2 { background: linear-gradient(45deg, #ff7f50, #ff6b81, #7bed9f, #70a1ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; text-shadow: 0px 0px 15px rgba(255, 107, 129, 0.4); }
 body.dark-theme .chat-titulo { color: #7bed9f; }
