@@ -621,3 +621,68 @@ create policy "user_passkeys_all" on public.user_passkeys
   for all to authenticated
   using (public.is_superadmin() or user_id = auth.uid())
   with check (public.is_superadmin() or user_id = auth.uid());
+
+-- =========================================================================
+-- SECCIÓN 8: COMPARTIR HORARIOS ENTRE USUARIOS (calendar_shares)
+-- =========================================================================
+
+create table if not exists public.calendar_shares (
+  id uuid primary key default gen_random_uuid(),
+  owner_name text not null,
+  granted_to text not null,
+  owner_id uuid references auth.users(id) on delete cascade,
+  granted_to_id uuid references auth.users(id) on delete cascade,
+  created_at timestamptz not null default timezone('utc'::text, now()),
+  constraint unique_owner_granted unique (owner_name, granted_to)
+);
+
+create index if not exists idx_calendar_shares_owner on public.calendar_shares(lower(owner_name));
+create index if not exists idx_calendar_shares_granted on public.calendar_shares(lower(granted_to));
+
+alter table public.calendar_shares enable row level security;
+alter table public.calendar_shares force row level security;
+
+drop policy if exists "calendar_shares_select" on public.calendar_shares;
+create policy "calendar_shares_select" on public.calendar_shares for select to authenticated
+  using (
+    public.is_superadmin()
+    or lower(owner_name) = lower(coalesce(auth.jwt()->'user_metadata'->>'nombre', split_part(auth.jwt()->>'email', '@', 1)))
+    or lower(granted_to) = lower(coalesce(auth.jwt()->'user_metadata'->>'nombre', split_part(auth.jwt()->>'email', '@', 1)))
+    or owner_id = auth.uid()
+    or granted_to_id = auth.uid()
+  );
+
+drop policy if exists "calendar_shares_insert" on public.calendar_shares;
+create policy "calendar_shares_insert" on public.calendar_shares for insert to authenticated
+  with check (
+    public.is_superadmin()
+    or lower(owner_name) = lower(coalesce(auth.jwt()->'user_metadata'->>'nombre', split_part(auth.jwt()->>'email', '@', 1)))
+    or owner_id = auth.uid()
+  );
+
+drop policy if exists "calendar_shares_delete" on public.calendar_shares;
+create policy "calendar_shares_delete" on public.calendar_shares for delete to authenticated
+  using (
+    public.is_superadmin()
+    or lower(owner_name) = lower(coalesce(auth.jwt()->'user_metadata'->>'nombre', split_part(auth.jwt()->>'email', '@', 1)))
+    or owner_id = auth.uid()
+  );
+
+-- Actualizar política de Turnos para permitir lectura cuando existe share
+drop policy if exists "turnos_select_strict" on public."Turnos";
+create policy "turnos_select_strict" on public."Turnos" for select to authenticated
+  using (
+    public.is_superadmin()
+    or usuario_id = auth.uid()
+    or lower(usuario) = lower(coalesce(auth.jwt()->'user_metadata'->>'nombre', split_part(auth.jwt()->>'email', '@', 1)))
+    or usuario in (select p.nombre from public.perfiles p where p.user_id = auth.uid())
+    or exists (
+      select 1 from public.calendar_shares cs
+      where lower(cs.owner_name) = lower(public."Turnos".usuario)
+        and (
+          lower(cs.granted_to) = lower(coalesce(auth.jwt()->'user_metadata'->>'nombre', split_part(auth.jwt()->>'email', '@', 1)))
+          or cs.granted_to_id = auth.uid()
+        )
+    )
+  );
+

@@ -156,11 +156,15 @@
         </div>
 
         <div class="acciones-cuadrante-row">
+          <button type="button" id="btn-abrir-compartir-horario" class="btn-compartir-horario" title="Compartir o invitar a ver mi horario">🔗 Compartir Horario</button>
           <button id="btn-abrir-scan-foto" class="btn-scan-foto">📷 Escanear con IA</button>
           <button id="btn-secuencia" class="btn-secuencia">✨ Rellenar secuencia</button>
           <button type="button" id="btn-guardar-horario-top" class="btn-guardar-horario-top" title="Guardar modificaciones del horario">💾 Guardar Horario</button>
         </div>
       </div>
+
+      <!-- BANNER DE PRIVACIDAD / MODO LECTURA HORARIO COMPARTIDO -->
+      <div id="banner-privacidad-cal" class="banner-privacidad-cal" style="display: none;"></div>
 
       <!-- CONTENEDOR DEL MES -->
       <div id="vista-mes-container">
@@ -458,6 +462,7 @@
         </div>
         <div class="perfil-acciones-grid">
           <button id="btn-conmutar-a-cule" class="btn-chip-action" title="Cambiar a Cule (Administrador)" style="background: linear-gradient(135deg, #4f46e5, #6366f1); color: #fff; font-weight: 800;">👑 Conmutar a Cule (Admin)</button>
+          <button type="button" id="btn-perfil-compartir-horario" class="btn-chip-action" title="Gestionar quién puede ver tu cuadrante">🔗 Compartir mi Horario</button>
           <button id="btn-activar-passkey" class="btn-chip-action" title="Vincular Face ID / Touch ID">🔑 Vincular Face ID / Touch ID</button>
           <button id="btn-notificaciones" class="btn-chip-action" title="Activar avisos de coincidencias">🔔 Notificaciones</button>
           <button id="btn-logout" class="btn-chip-action btn-danger-chip" title="Cerrar sesión">🚪 Cerrar Sesión</button>
@@ -794,6 +799,78 @@
       </div>
       <div class="modal-footer">
         <button type="button" id="btn-cerrar-grupos-footer" class="btn-sec-secundario">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL COMPARTIR HORARIO Y PERMISOS DE CALENDARIO -->
+  <div id="modal-compartir-horario" class="modal-overlay" style="display: none;">
+    <div class="modal-card modal-compartir-card">
+      <div class="modal-header">
+        <div class="modal-header-title-wrap">
+          <span class="modal-header-icon">🔗</span>
+          <div>
+            <h3>Compartir mi Horario</h3>
+            <p class="modal-sub">Cada usuario decide quién puede ver sus turnos de trabajo.</p>
+          </div>
+        </div>
+        <button id="btn-cerrar-modal-compartir" class="btn-cerrar" title="Cerrar">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <!-- 1. Enlace de invitación directa -->
+        <div class="compartir-seccion-card">
+          <div class="compartir-card-header">
+            <span class="comp-icon">✉️</span>
+            <div>
+              <h4>Invitar con enlace directo</h4>
+              <p>Envía este enlace a tus compañeros para que puedan ver tus turnos:</p>
+            </div>
+          </div>
+          <div class="input-copiar-enlace-wrap">
+            <input type="text" id="input-enlace-compartir-horario" readonly class="input-enlace-compartir">
+            <button type="button" id="btn-copiar-enlace-horario" class="btn-copiar-link-mini">📋 Copiar</button>
+          </div>
+          <div class="compartir-quick-btns">
+            <button type="button" id="btn-whatsapp-compartir-horario" class="btn-whatsapp-share">💬 Compartir por WhatsApp</button>
+          </div>
+        </div>
+
+        <!-- 2. Lista de personas con permisos de acceso -->
+        <div class="compartir-seccion-card">
+          <div class="compartir-card-header">
+            <span class="comp-icon">👥</span>
+            <div>
+              <h4>Compañeros con acceso a tu horario</h4>
+              <p>Toca para conceder o revocar permiso a cada persona:</p>
+            </div>
+          </div>
+
+          <div class="compartir-acciones-rapidas-row">
+            <button type="button" id="btn-compartir-todo-grupo" class="btn-accion-mini-compartir">✅ Permitir a todo el grupo</button>
+            <button type="button" id="btn-privatizar-todo-horario" class="btn-accion-mini-compartir btn-accion-mini-peligro">🔒 Hacer 100% privado</button>
+          </div>
+
+          <div id="lista-permisos-usuarios-contenedor" class="lista-permisos-usuarios-grid">
+            <!-- Items de usuarios generados dinámicamente -->
+          </div>
+        </div>
+
+        <!-- 3. Calendarios compartidos contigo -->
+        <div class="compartir-seccion-card" id="seccion-compartidos-conmigo" style="display: none;">
+          <div class="compartir-card-header">
+            <span class="comp-icon">📅</span>
+            <div>
+              <h4>Horarios compartidos contigo</h4>
+              <p>Compañeros que te han dado acceso para ver sus turnos:</p>
+            </div>
+          </div>
+          <div id="lista-compartidos-conmigo-contenedor" class="lista-compartidos-conmigo-grid"></div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" id="btn-cerrar-compartir-footer" class="btn-sec-secundario">Cerrar</button>
       </div>
     </div>
   </div>

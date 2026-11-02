@@ -514,7 +514,13 @@ function renderizarSelectoresUsuarios() {
     miembrosGrupo.forEach(u => {
       const opt = document.createElement('option');
       opt.value = u;
-      opt.textContent = u;
+      const esPropio = u.toLowerCase() === (usuarioLogueado || '').toLowerCase();
+      if (esPropio) {
+        opt.textContent = `👤 ${u} (Mi horario)`;
+      } else {
+        const compartido = (typeof tienePermisoCalendario === 'function') && tienePermisoCalendario(u, usuarioLogueado);
+        opt.textContent = compartido ? `🔓 ${u} (Compartido)` : `🔒 ${u} (Privado)`;
+      }
       selectorUsuario.appendChild(opt);
     });
     if (miembrosGrupo.includes(miUsuario)) {
@@ -643,6 +649,7 @@ function cambiarUsuarioActivo(nuevoNombre) {
   try { renderizarSelectoresUsuarios(); } catch(e) {}
   try { renderizarFiltroCoincidencias(true); } catch(e) {}
   try { iniciarCalendario(); } catch(e) {}
+  try { actualizarBannerPrivacidadCal(); } catch(e) {}
   try {
     if (typeof window.cargarDatosUniversitariosEnPerfil === 'function') {
       window.cargarDatosUniversitariosEnPerfil();
@@ -2233,17 +2240,444 @@ async function guardarTurnoNube(dia, indiceEstado, mesAnioEspecifico = null) {
   }
 }
 
+// =========================================================================
+// --- 5B. SISTEMA DE PRIVACIDAD Y COMPARTICIÓN DE HORARIOS ENTRE USUARIOS -
+// =========================================================================
+const STORAGE_PERMISOS_CALENDARIO_KEY = 'kedadas_calendario_permisos_v1';
+let mapaPermisosCalendarios = {}; // { [ownerLower]: Set([viewerLower1, viewerLower2]) }
+
+function cargarPermisosLocales() {
+  try {
+    const raw = localStorage.getItem(STORAGE_PERMISOS_CALENDARIO_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      mapaPermisosCalendarios = {};
+      for (const [owner, viewers] of Object.entries(parsed)) {
+        if (Array.isArray(viewers)) {
+          mapaPermisosCalendarios[owner.toLowerCase()] = new Set(viewers.map(v => String(v).toLowerCase()));
+        }
+      }
+    }
+  } catch (e) {
+    mapaPermisosCalendarios = {};
+  }
+}
+
+function guardarPermisosLocales() {
+  try {
+    const obj = {};
+    for (const [owner, setViewers] of Object.entries(mapaPermisosCalendarios)) {
+      obj[owner] = Array.from(setViewers);
+    }
+    localStorage.setItem(STORAGE_PERMISOS_CALENDARIO_KEY, JSON.stringify(obj));
+  } catch (e) {}
+}
+
+// Cargar permisos desde la tabla calendar_shares en Supabase
+async function cargarPermisosCalendarioDesdeBD() {
+  cargarPermisosLocales();
+  try {
+    const { data, error } = await supabaseApp.from('calendar_shares').select('*');
+    if (!error && Array.isArray(data)) {
+      data.forEach(row => {
+        const owner = (row.owner_name || '').trim().toLowerCase();
+        const viewer = (row.granted_to || '').trim().toLowerCase();
+        if (owner && viewer) {
+          if (!mapaPermisosCalendarios[owner]) mapaPermisosCalendarios[owner] = new Set();
+          mapaPermisosCalendarios[owner].add(viewer);
+        }
+      });
+      guardarPermisosLocales();
+    }
+  } catch (e) {
+    console.warn('Aviso cargando calendar_shares de Supabase:', e);
+  }
+}
+
+// Comprueba si `viewer` tiene permiso para ver el horario de `owner`
+function tienePermisoCalendario(owner, viewer) {
+  if (!owner || !viewer) return false;
+  const o = String(owner).trim().toLowerCase();
+  const v = String(viewer).trim().toLowerCase();
+  if (o === v) return true;
+  const permitidos = mapaPermisosCalendarios[o];
+  return Boolean(permitidos && permitidos.has(v));
+}
+
+// Conceder permiso para que `viewer` pueda ver el calendario de `owner`
+async function concederPermisoCalendario(owner, viewer) {
+  if (!owner || !viewer) return false;
+  const o = String(owner).trim().toLowerCase();
+  const v = String(viewer).trim().toLowerCase();
+  if (o === v) return true;
+
+  if (!mapaPermisosCalendarios[o]) mapaPermisosCalendarios[o] = new Set();
+  mapaPermisosCalendarios[o].add(v);
+  guardarPermisosLocales();
+
+  try {
+    await supabaseApp.from('calendar_shares').upsert({
+      owner_name: owner.trim(),
+      granted_to: viewer.trim()
+    }, { onConflict: 'owner_name,granted_to' });
+  } catch (e) {
+    console.warn('Aviso guardando calendar_share en Supabase:', e);
+  }
+
+  return true;
+}
+
+// Revocar permiso
+async function revocarPermisoCalendario(owner, viewer) {
+  if (!owner || !viewer) return false;
+  const o = String(owner).trim().toLowerCase();
+  const v = String(viewer).trim().toLowerCase();
+
+  if (mapaPermisosCalendarios[o]) {
+    mapaPermisosCalendarios[o].delete(v);
+    guardarPermisosLocales();
+  }
+
+  try {
+    await supabaseApp.from('calendar_shares').delete()
+      .eq('owner_name', owner.trim())
+      .eq('granted_to', viewer.trim());
+  } catch (e) {
+    console.warn('Aviso eliminando calendar_share en Supabase:', e);
+  }
+
+  return true;
+}
+
+// Compartir con todos los miembros del grupo actual
+async function compartirHorarioConTodoElGrupo() {
+  const yo = (usuarioLogueado || 'Cule').trim();
+  const miembros = (typeof obtenerMiembrosGrupo === 'function') ? obtenerMiembrosGrupo(grupoActivo) : [];
+  let anadidos = 0;
+  for (const m of miembros) {
+    if (m && String(m).toLowerCase() !== yo.toLowerCase()) {
+      await concederPermisoCalendario(yo, m);
+      anadidos++;
+    }
+  }
+  renderizarListaPermisosModal();
+  actualizarBannerPrivacidadCal();
+  try { renderizarSelectoresUsuarios(); } catch(e) {}
+  if (typeof confetti === 'function') confetti({ particleCount: 30, spread: 60 });
+  alert(`✅ Has compartido tu horario con los miembros del grupo "${grupoActivo}".`);
+}
+
+// Hacer 100% privado (revocar todos los accesos a mi horario)
+async function privatizarTodoMiHorario() {
+  const yo = (usuarioLogueado || 'Cule').trim();
+  const seguro = confirm('¿Deseas revocar todos los accesos a tu horario?\nNadie más podrá ver tus turnos salvo que vuelvas a invitarles.');
+  if (!seguro) return;
+
+  const o = yo.toLowerCase();
+  if (mapaPermisosCalendarios[o]) {
+    mapaPermisosCalendarios[o].clear();
+    guardarPermisosLocales();
+  }
+
+  try {
+    await supabaseApp.from('calendar_shares').delete().eq('owner_name', yo);
+  } catch (e) {}
+
+  renderizarListaPermisosModal();
+  actualizarBannerPrivacidadCal();
+  try { renderizarSelectoresUsuarios(); } catch(e) {}
+  alert('🔒 Tu horario ahora es 100% privado. Solo tú puedes ver tus turnos.');
+}
+
+// Generar enlace de invitación para compartir mi horario
+function generarEnlaceCompartirHorario(owner) {
+  const baseUser = (owner || usuarioLogueado || 'Cule').trim();
+  return `${window.location.origin}${window.location.pathname}?compartir_horario_de=${encodeURIComponent(baseUser)}`;
+}
+
+// Detectar si se ha abierto un enlace de compartir horario
+async function comprobarParametroCompartirHorarioUrl() {
+  try {
+    const urlParams = new URLSearchParams(window.location.search);
+    const ownerParam = urlParams.get('compartir_horario_de') || urlParams.get('ver_horario_de') || urlParams.get('horario_de');
+    if (ownerParam) {
+      const ownerLimpio = ownerParam.trim();
+      const yo = (usuarioLogueado || 'Cule').trim();
+      
+      await concederPermisoCalendario(ownerLimpio, yo);
+
+      // Limpiar URL sin recargar la página
+      const url = new URL(window.location);
+      url.searchParams.delete('compartir_horario_de');
+      url.searchParams.delete('ver_horario_de');
+      url.searchParams.delete('horario_de');
+      window.history.replaceState({}, document.title, url.toString());
+
+      if (typeof confetti === 'function') confetti({ particleCount: 60, spread: 80 });
+      alert(`🎉 ¡"${ownerLimpio}" ha compartido su horario contigo!\nAhora tienes acceso para ver sus turnos en el cuadrante.`);
+
+      miUsuario = ownerLimpio;
+      if (selectorUsuario) selectorUsuario.value = miUsuario;
+      iniciarCalendario();
+    }
+  } catch (e) {}
+}
+
+// Pedir a un usuario que me comparta su horario
+function pedirCompartirHorario(targetUsuario) {
+  const yo = (usuarioLogueado || 'Mi usuario').trim();
+  const mensaje = `¡Hola ${targetUsuario}! ¿Me compartes tu horario en Kedadas para ver cuándo libramos? Entra en la app y toca "Compartir Horario" -> "Permitir a ${yo}".`;
+
+  if (navigator.share) {
+    navigator.share({
+      title: `Kedadas - Solicitud de horario de ${yo}`,
+      text: mensaje
+    }).catch(() => {});
+    return;
+  }
+
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(mensaje).then(() => {
+      alert(`📋 Mensaje copiado al portapapeles:\n\n"${mensaje}"\n\nPégalo en WhatsApp para enviárselo a ${targetUsuario}.`);
+    }).catch(() => {
+      alert(mensaje);
+    });
+  } else {
+    alert(mensaje);
+  }
+}
+
+// Actualizar banner superior cuando se consulta un horario ajeno compartido
+function actualizarBannerPrivacidadCal() {
+  const banner = document.getElementById('banner-privacidad-cal');
+  if (!banner) return;
+
+  const esPropio = ((miUsuario || '').toLowerCase() === (usuarioLogueado || '').toLowerCase());
+  if (esPropio) {
+    banner.style.display = 'none';
+    banner.className = 'banner-privacidad-cal';
+    banner.innerHTML = '';
+    return;
+  }
+
+  const tieneAcceso = tienePermisoCalendario(miUsuario, usuarioLogueado);
+  if (tieneAcceso) {
+    banner.style.display = 'flex';
+    banner.className = 'banner-privacidad-cal modo-lectura';
+    banner.innerHTML = `
+      <div>
+        <span>🔓 Estás viendo el horario compartido de <strong>${escapeHtml(miUsuario)}</strong> (Modo solo lectura)</span>
+      </div>
+      <button type="button" class="btn-volver-propio-pill" id="btn-banner-volver-propio">👤 Volver al mío (${escapeHtml(usuarioLogueado || 'Tú')})</button>
+    `;
+    const btnVolver = document.getElementById('btn-banner-volver-propio');
+    if (btnVolver) {
+      btnVolver.addEventListener('click', () => {
+        miUsuario = usuarioLogueado || 'Cule';
+        if (selectorUsuario) selectorUsuario.value = miUsuario;
+        iniciarCalendario();
+      });
+    }
+  } else {
+    banner.style.display = 'none';
+  }
+}
+
+// Abrir y gestionar la modal de compartir horario
+function abrirModalCompartirHorario() {
+  const modal = document.getElementById('modal-compartir-horario');
+  if (!modal) return;
+
+  const yo = (usuarioLogueado || 'Cule').trim();
+  const inputLink = document.getElementById('input-enlace-compartir-horario');
+  if (inputLink) {
+    inputLink.value = generarEnlaceCompartirHorario(yo);
+  }
+
+  renderizarListaPermisosModal();
+  modal.style.display = 'flex';
+}
+
+function cerrarModalCompartirHorario() {
+  const modal = document.getElementById('modal-compartir-horario');
+  if (modal) modal.style.display = 'none';
+  actualizarBannerPrivacidadCal();
+}
+
+function renderizarListaPermisosModal() {
+  const yo = (usuarioLogueado || 'Cule').trim();
+  const contenedor = document.getElementById('lista-permisos-usuarios-contenedor');
+  if (!contenedor) return;
+
+  contenedor.innerHTML = '';
+
+  const candidatosSet = new Set();
+  const miembrosGrupo = (typeof obtenerMiembrosGrupo === 'function') ? obtenerMiembrosGrupo(grupoActivo) : [];
+  miembrosGrupo.forEach(m => { if (m) candidatosSet.add(String(m).trim()); });
+  (usuarios || []).forEach(u => { if (u) candidatosSet.add(String(u).trim()); });
+  (listaPerfiles || []).forEach(p => { if (p && p.nombre) candidatosSet.add(String(p.nombre).trim()); });
+
+  candidatosSet.delete(yo);
+  const candidatos = Array.from(candidatosSet).sort();
+
+  if (candidatos.length === 0) {
+    contenedor.innerHTML = '<p style="text-align:center; color:#64748b; font-size:0.85rem; padding:15px;">No hay otros usuarios registrados en el grupo.</p>';
+    return;
+  }
+
+  candidatos.forEach(nombre => {
+    const permitido = tienePermisoCalendario(yo, nombre);
+    const item = document.createElement('div');
+    item.className = 'item-permiso-usuario';
+
+    item.innerHTML = `
+      <div class="item-permiso-user-info">
+        <div class="item-permiso-avatar">${escapeHtml(nombre.charAt(0).toUpperCase())}</div>
+        <div>
+          <div class="item-permiso-name-txt">${escapeHtml(nombre)}</div>
+          <span class="item-permiso-badge-status ${permitido ? 'permitido' : 'denegado'}">
+            ${permitido ? '✅ Acceso concedido' : '🔒 Privado'}
+          </span>
+        </div>
+      </div>
+      <button type="button" class="btn-toggle-permiso-mini ${permitido ? 'revocar' : 'permitir'}">
+        ${permitido ? '❌ Revocar' : '➕ Dar Acceso'}
+      </button>
+    `;
+
+    const btnToggle = item.querySelector('.btn-toggle-permiso-mini');
+    btnToggle.addEventListener('click', async () => {
+      if (permitido) {
+        await revocarPermisoCalendario(yo, nombre);
+      } else {
+        await concederPermisoCalendario(yo, nombre);
+      }
+      renderizarListaPermisosModal();
+      actualizarBannerPrivacidadCal();
+      try { renderizarSelectoresUsuarios(); } catch(e) {}
+    });
+
+    contenedor.appendChild(item);
+  });
+
+  // Sección 3: Horarios compartidos conmigo
+  const seccionCompartidos = document.getElementById('seccion-compartidos-conmigo');
+  const contenedorCompartidos = document.getElementById('lista-compartidos-conmigo-contenedor');
+  if (seccionCompartidos && contenedorCompartidos) {
+    const compartidosConmigo = [];
+    for (const [ownerLower, viewersSet] of Object.entries(mapaPermisosCalendarios)) {
+      if (ownerLower !== yo.toLowerCase() && viewersSet.has(yo.toLowerCase())) {
+        const origUser = (usuarios || []).find(u => u.toLowerCase() === ownerLower) || ownerLower;
+        compartidosConmigo.push(origUser);
+      }
+    }
+
+    if (compartidosConmigo.length > 0) {
+      seccionCompartidos.style.display = 'block';
+      contenedorCompartidos.innerHTML = '';
+      compartidosConmigo.forEach(ownerNombre => {
+        const item = document.createElement('div');
+        item.className = 'item-permiso-usuario';
+        item.innerHTML = `
+          <div class="item-permiso-user-info">
+            <div class="item-permiso-avatar" style="background: linear-gradient(135deg, #10b981, #059669);">📅</div>
+            <div>
+              <div class="item-permiso-name-txt">${escapeHtml(ownerNombre)}</div>
+              <span class="item-permiso-badge-status permitido">Te ha dado acceso</span>
+            </div>
+          </div>
+          <button type="button" class="btn-toggle-permiso-mini permitir">📅 Ver Cuadrante</button>
+        `;
+        const btnVer = item.querySelector('.btn-toggle-permiso-mini');
+        btnVer.addEventListener('click', () => {
+          cerrarModalCompartirHorario();
+          miUsuario = ownerNombre;
+          if (selectorUsuario) selectorUsuario.value = miUsuario;
+          iniciarCalendario();
+        });
+        contenedorCompartidos.appendChild(item);
+      });
+    } else {
+      seccionCompartidos.style.display = 'none';
+      contenedorCompartidos.innerHTML = '';
+    }
+  }
+}
+
+function inicializarEventosCompartirHorario() {
+  const btnAbrir = document.getElementById('btn-abrir-compartir-horario');
+  const btnPerfilAbrir = document.getElementById('btn-perfil-compartir-horario');
+  const btnCerrar = document.getElementById('btn-cerrar-modal-compartir');
+  const btnCerrarFooter = document.getElementById('btn-cerrar-compartir-footer');
+  const btnCopiar = document.getElementById('btn-copiar-enlace-horario');
+  const btnWhatsapp = document.getElementById('btn-whatsapp-compartir-horario');
+  const btnTodoGrupo = document.getElementById('btn-compartir-todo-grupo');
+  const btnPrivatizar = document.getElementById('btn-privatizar-todo-horario');
+
+  if (btnAbrir) btnAbrir.addEventListener('click', abrirModalCompartirHorario);
+  if (btnPerfilAbrir) btnPerfilAbrir.addEventListener('click', abrirModalCompartirHorario);
+  if (btnCerrar) btnCerrar.addEventListener('click', cerrarModalCompartirHorario);
+  if (btnCerrarFooter) btnCerrarFooter.addEventListener('click', cerrarModalCompartirHorario);
+
+  if (btnCopiar) {
+    btnCopiar.addEventListener('click', async () => {
+      const yo = (usuarioLogueado || 'Cule').trim();
+      const link = generarEnlaceCompartirHorario(yo);
+      try {
+        await navigator.clipboard.writeText(link);
+        const originalText = btnCopiar.textContent;
+        btnCopiar.textContent = '✅ ¡Copiado!';
+        setTimeout(() => { btnCopiar.textContent = originalText; }, 2000);
+        alert(`📋 Enlace copiado al portapapeles:\n\n${link}\n\nEnvíalo a quien quieras dar acceso a tu horario.`);
+      } catch (e) {
+        prompt('Copia este enlace de invitación:', link);
+      }
+    });
+  }
+
+  if (btnWhatsapp) {
+    btnWhatsapp.addEventListener('click', () => {
+      const yo = (usuarioLogueado || 'Cule').trim();
+      const link = generarEnlaceCompartirHorario(yo);
+      const texto = `¡Hola! Aquí tienes mi horario de turnos en Kedadas para que podamos ver cuándo libramos juntos:\n${link}`;
+      window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(texto)}`, '_blank');
+    });
+  }
+
+  if (btnTodoGrupo) btnTodoGrupo.addEventListener('click', compartirHorarioConTodoElGrupo);
+  if (btnPrivatizar) btnPrivatizar.addEventListener('click', privatizarTodoMiHorario);
+}
+
 // Comprobar si el usuario conectado tiene autorización para ver el calendario de `targetUsuario`
 async function verificarPermisoCalendario(targetUsuario) {
-  // En Kedadas, los miembros comparten sus calendarios para coordinar turnos y quedadas
-  return { autorizado: true, esPropio: ((targetUsuario || '').toLowerCase() === (usuarioLogueado || '').toLowerCase()) };
+  const viewer = (usuarioLogueado || '').trim();
+  const owner = (targetUsuario || '').trim();
+
+  // 1. Si no hay usuario especificado o es mi propio calendario -> Autorizado
+  if (!owner || !viewer || owner.toLowerCase() === viewer.toLowerCase()) {
+    return { autorizado: true, esPropio: true, motivo: 'propio' };
+  }
+
+  // 2. Comprobar si el dueño (owner) le ha concedido permiso al espectador (viewer)
+  if (tienePermisoCalendario(owner, viewer)) {
+    return { autorizado: true, esPropio: false, motivo: 'compartido' };
+  }
+
+  // 3. De lo contrario, acceso denegado (Protegido por privacidad)
+  return { autorizado: false, esPropio: false, motivo: 'privado' };
 }
 
 async function obtenerTurnosMesNube() {
   const mesAnio = `${fechaNavegacion.getFullYear()}-${fechaNavegacion.getMonth()}`;
-  const esPropio = (miUsuario.toLowerCase() === (usuarioLogueado || '').toLowerCase());
+  const esPropio = ((miUsuario || '').toLowerCase() === (usuarioLogueado || '').toLowerCase());
+
+  // 1. Verificación estricta de autorización
+  const permiso = await verificarPermisoCalendario(miUsuario);
+  if (!permiso.autorizado) {
+    return { autorizado: false, turnos: [] };
+  }
+
   const keyLocal = `kedadas_turnos_${miUsuario}_${mesAnio}`;
-  
   let turnosLocales = [];
   try {
     const raw = localStorage.getItem(keyLocal);
@@ -2274,9 +2708,15 @@ async function obtenerTurnosMesNube() {
 
 async function obtenerTurnosAnoNube() {
   const anioPrefix = `${fechaNavegacion.getFullYear()}-`;
-  const esPropio = (miUsuario.toLowerCase() === (usuarioLogueado || '').toLowerCase());
-  const keyLocal = `kedadas_turnos_ano_${miUsuario}_${fechaNavegacion.getFullYear()}`;
+  const esPropio = ((miUsuario || '').toLowerCase() === (usuarioLogueado || '').toLowerCase());
 
+  // 1. Verificación estricta de autorización
+  const permiso = await verificarPermisoCalendario(miUsuario);
+  if (!permiso.autorizado) {
+    return { autorizado: false, turnos: [] };
+  }
+
+  const keyLocal = `kedadas_turnos_ano_${miUsuario}_${fechaNavegacion.getFullYear()}`;
   let turnosLocales = [];
   try {
     const raw = localStorage.getItem(keyLocal);
@@ -2476,6 +2916,7 @@ function normalizarIndiceEstado(valor) {
 async function iniciarCalendario() {
   try {
     actualizarBannerGrupo();
+    actualizarBannerPrivacidadCal();
     if (modoVista === 'mes') await renderizarMes();
     else await renderizarAno();
   } catch(errCal) {
@@ -2501,15 +2942,18 @@ async function renderizarMes() {
     console.warn('Aviso obteniendo turnos mes:', e);
   }
 
-  // Si no está autorizado (ej. Lucía intentando ver el calendario de Cule sin permiso):
+  // Si no está autorizado (el usuario no ha compartido su horario):
   if (!resTurnos.autorizado) {
     calendarGrid.innerHTML = `
       <div class="bloqueo-privacidad-calendario">
         <div class="icono-candado">🔒</div>
         <h3>Calendario Privado</h3>
         <p>No tienes autorización para ver el calendario de <strong>${escapeHtml(miUsuario)}</strong>.</p>
-        <span class="subtexto-privacidad">Por políticas de seguridad y privacidad (RLS), ${escapeHtml(miUsuario)} debe otorgarte permiso explícito para que puedas ver sus turnos de trabajo.</span>
-        <button type="button" id="btn-volver-mi-cal" style="padding: 10px 18px; border-radius: 12px; cursor: pointer; font-weight: 700; background: linear-gradient(135deg, #4f46e5, #6366f1); color: #fff; border: none; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);">👤 Volver a mi calendario (${escapeHtml(usuarioLogueado || 'Mi usuario')})</button>
+        <span class="subtexto-privacidad">Por políticas de privacidad, cada usuario solo puede ver su propio horario. <strong>${escapeHtml(miUsuario)}</strong> debe otorgarte permiso o invitarte para que puedas ver sus turnos de trabajo.</span>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 15px;">
+          <button type="button" id="btn-volver-mi-cal" style="padding: 10px 18px; border-radius: 12px; cursor: pointer; font-weight: 700; background: linear-gradient(135deg, #4f46e5, #6366f1); color: #fff; border: none; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);">👤 Volver a mi calendario (${escapeHtml(usuarioLogueado || 'Mi usuario')})</button>
+          <button type="button" id="btn-pedir-compartir-cal" style="padding: 10px 18px; border-radius: 12px; cursor: pointer; font-weight: 700; background: #fff; color: #475569; border: 1.5px solid #cbd5e1;">💬 Pedir a ${escapeHtml(miUsuario)} que me comparta su horario</button>
+        </div>
       </div>
     `;
     const btnVolver = document.getElementById('btn-volver-mi-cal');
@@ -2518,6 +2962,12 @@ async function renderizarMes() {
         miUsuario = usuarioLogueado || 'Cule';
         if (selectorUsuario) selectorUsuario.value = miUsuario;
         iniciarCalendario();
+      });
+    }
+    const btnPedir = document.getElementById('btn-pedir-compartir-cal');
+    if (btnPedir) {
+      btnPedir.addEventListener('click', () => {
+        pedirCompartirHorario(miUsuario);
       });
     }
     actualizarBarraCambiosPendientes();
@@ -2564,7 +3014,9 @@ async function renderizarMes() {
     `;
 
     dayCell.addEventListener('click', () => {
-      if (!esAdmin && miUsuario !== usuarioLogueado) return alert('Solo puedes editar tus turnos.');
+      if ((miUsuario || '').toLowerCase() !== (usuarioLogueado || '').toLowerCase()) {
+        return alert(`🔒 Estás viendo el horario compartido de ${miUsuario} en modo solo lectura.\nSolo ${miUsuario} puede modificar sus turnos de trabajo.`);
+      }
 
       let rawEstadoActual = cambiosHorarioPendientes[i] !== undefined 
         ? cambiosHorarioPendientes[i] 
@@ -2648,8 +3100,11 @@ async function renderizarAno() {
         <div class="icono-candado">🔒</div>
         <h3>Calendario Anual Privado</h3>
         <p>No tienes autorización para ver el calendario anual de <strong>${escapeHtml(miUsuario)}</strong>.</p>
-        <span class="subtexto-privacidad">Por políticas de seguridad (RLS), necesitas permiso explícito de ${escapeHtml(miUsuario)} para consultar su cuadrante.</span>
-        <button type="button" id="btn-volver-mi-cal-ano" style="padding: 10px 18px; border-radius: 12px; cursor: pointer; font-weight: 700; background: linear-gradient(135deg, #4f46e5, #6366f1); color: #fff; border: none; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);">👤 Volver a mi calendario</button>
+        <span class="subtexto-privacidad">Por políticas de privacidad, cada usuario solo puede ver su propio horario. <strong>${escapeHtml(miUsuario)}</strong> debe otorgarte permiso para consultar su cuadrante.</span>
+        <div style="display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 15px;">
+          <button type="button" id="btn-volver-mi-cal-ano" style="padding: 10px 18px; border-radius: 12px; cursor: pointer; font-weight: 700; background: linear-gradient(135deg, #4f46e5, #6366f1); color: #fff; border: none; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);">👤 Volver a mi calendario</button>
+          <button type="button" id="btn-pedir-compartir-cal-ano" style="padding: 10px 18px; border-radius: 12px; cursor: pointer; font-weight: 700; background: #fff; color: #475569; border: 1.5px solid #cbd5e1;">💬 Pedir a ${escapeHtml(miUsuario)} que me comparta su horario</button>
+        </div>
       </div>
     `;
     const btnVolver = document.getElementById('btn-volver-mi-cal-ano');
@@ -2658,6 +3113,12 @@ async function renderizarAno() {
         miUsuario = usuarioLogueado || 'Cule';
         if (selectorUsuario) selectorUsuario.value = miUsuario;
         iniciarCalendario();
+      });
+    }
+    const btnPedir = document.getElementById('btn-pedir-compartir-cal-ano');
+    if (btnPedir) {
+      btnPedir.addEventListener('click', () => {
+        pedirCompartirHorario(miUsuario);
       });
     }
     return;
@@ -2728,7 +3189,9 @@ async function renderizarAno() {
       dayCell.textContent = dia;
 
       dayCell.addEventListener('click', async () => {
-        if (!esAdmin && miUsuario !== usuarioLogueado) return alert('Solo puedes editar tus turnos.');
+        if ((miUsuario || '').toLowerCase() !== (usuarioLogueado || '').toLowerCase()) {
+          return alert(`🔒 Estás viendo el horario compartido de ${miUsuario} en modo solo lectura.\nSolo ${miUsuario} puede modificar sus turnos.`);
+        }
         let nuevoIndice = (indice + 1) % estados.length;
         const nuevoEstadoObj = estados[nuevoIndice] || estados[0];
         const confirmacion = confirm(`¿Cambiar el día ${dia} de ${nombresMeses[mes]} a "${nuevoEstadoObj.texto || 'Vacío'}"?`);
@@ -4834,6 +5297,11 @@ window.addEventListener('DOMContentLoaded', async () => {
   try {
     comprobarParametroInvitacionUrl();
   } catch(e) {}
+
+  // Sistema de compartir horarios e invitaciones directas
+  try { inicializarEventosCompartirHorario(); } catch(e) {}
+  try { await cargarPermisosCalendarioDesdeBD(); } catch(e) {}
+  try { await comprobarParametroCompartirHorarioUrl(); } catch(e) {}
 });
 
 // Inicializa el formulario del perfil para modo universitario
