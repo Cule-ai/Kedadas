@@ -4,7 +4,7 @@
   "description": "PWA para cuadrantes de turnos rotativos, planes y gestión de grupos con privacidad Zero-Knowledge",
   "type": "module",
   "scripts": {
-    "start": "python3 -m http.server 8080"
+    "start": "python3 -m http.server 8081"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.8",

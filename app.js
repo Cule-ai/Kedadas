@@ -1,25 +1,26 @@
-// =========================================================================
-// UTILIDAD DE SEGURIDAD: ESCAPADO HTML ESTRICTO (PREVENCIÓN XSS)
-// =========================================================================
-function escapeHtml(str) {
-  if (str === null || str === undefined) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+// --- Utilidades de seguridad ---
+function escapeHTML(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+async function cabecerasAuth() {
+  const { data: { session } } = await supabaseApp.auth.getSession();
+  const h = { 'Content-Type': 'application/json' };
+  if (session?.access_token) h['Authorization'] = 'Bearer ' + session.access_token;
+  return h;
 }
 
 const pantallaLogin = document.getElementById('pantalla-login');
 const pantallaApp = document.getElementById('pantalla-app');
+const inputPin = document.getElementById('login-pin');
+const loginUsuario = document.getElementById('login-usuario');
+const btnLoginPin = document.getElementById('btn-login-pin');
 const btnLoginFace = document.getElementById('btn-login-faceid');
 
 // Elementos de Supabase Auth
-const tabAuthLogin = document.getElementById('tab-auth-login');
-const tabAuthRegistro = document.getElementById('tab-auth-registro');
+const tabAuthEmail = document.getElementById('tab-auth-email');
+const tabAuthPin = document.getElementById('tab-auth-pin');
 const formAuthEmail = document.getElementById('form-auth-email');
-const wrapNombreReg = document.getElementById('wrap-nombre-registro');
+const formAuthPin = document.getElementById('form-auth-pin');
 const loginNombreReg = document.getElementById('login-nombre-reg');
 const loginEmail = document.getElementById('login-email');
 const loginPassword = document.getElementById('login-password');
@@ -61,41 +62,39 @@ const supabaseUrl = 'https://idpgvtixeyytfgpkqjjm.supabase.co';
 const supabaseKey = 'sb_publishable_S7NTo7XKekBigTm8U17rQA_u2Cp0SrI'; 
 const supabaseApp = supabase.createClient(supabaseUrl, supabaseKey);
 
-// --- 2. SISTEMA DE LOGIN Y SUPABASE AUTH EXCLUSIVO (SIN PIN) ---
+// --- 2. SISTEMA DE LOGIN, SUPABASE AUTH Y FACE ID (PASSKEYS) ---
 let usuarioLogueado = ''; 
-let miUsuario = '';
-let miUserId = null;
+let miUsuario = '';       
 let esAdmin = false;
 let modoVista = 'mes'; 
 
-// Alternar entre pestañas de Login y Registro
-if (tabAuthLogin && tabAuthRegistro) {
-  tabAuthLogin.addEventListener('click', () => {
-    tabAuthLogin.classList.add('activo');
-    tabAuthRegistro.classList.remove('activo');
-    if (wrapNombreReg) wrapNombreReg.style.display = 'none';
-    if (btnLoginEmail) btnLoginEmail.style.display = 'block';
-    if (btnRegisterEmail) btnRegisterEmail.style.display = 'none';
-    if (linkRecuperarPass) linkRecuperarPass.style.display = 'inline-block';
-  });
-
-  tabAuthRegistro.addEventListener('click', () => {
-    tabAuthRegistro.classList.add('activo');
-    tabAuthLogin.classList.remove('activo');
-    if (wrapNombreReg) {
-      wrapNombreReg.style.display = 'block';
-      if (loginNombreReg) loginNombreReg.focus();
+// Identidad y rol: SIEMPRE desde la tabla perfiles (el rol no se puede editar desde el cliente)
+async function resolverIdentidad(user) {
+  let nombre = null, admin = false;
+  try {
+    const { data: perfil } = await supabaseApp.from('perfiles')
+      .select('nombre,rol,is_superadmin').eq('user_id', user.id).maybeSingle();
+    if (perfil) {
+      nombre = perfil.nombre;
+      admin = !!perfil.is_superadmin || perfil.rol === 'admin' || perfil.rol === 'superadmin';
     }
-    if (btnLoginEmail) btnLoginEmail.style.display = 'none';
-    if (btnRegisterEmail) btnRegisterEmail.style.display = 'block';
-    if (linkRecuperarPass) linkRecuperarPass.style.display = 'none';
+  } catch (e) { console.warn('Aviso leyendo perfil:', e); }
+  if (!nombre) nombre = user.user_metadata?.nombre || (user.email || '').split('@')[0];
+  return { nombre, admin };
+}
+
+// Botón de Acceso Directo de prueba
+const btnAccesoDirecto = document.getElementById('btn-acceso-directo');
+if (btnAccesoDirecto) {
+  btnAccesoDirecto.addEventListener('click', () => {
+    concederAcceso('Cule', true);
   });
 }
 
 // Iniciar sesión con Supabase Auth (Email y Contraseña)
 if (btnLoginEmail) {
   btnLoginEmail.addEventListener('click', async () => {
-    const email = (loginEmail.value || '').trim();
+    const email = loginEmail.value.trim();
     const password = loginPassword.value;
     if (!email || !password) return alert('Por favor, introduce tu correo y contraseña.');
 
@@ -104,23 +103,8 @@ if (btnLoginEmail) {
       const { data, error } = await supabaseApp.auth.signInWithPassword({ email, password });
       btnLoginEmail.textContent = 'Iniciar Sesión';
       if (error) return alert('🚨 Error al iniciar sesión: ' + error.message);
-
-      const user = data.user;
-      miUserId = user.id;
-      let nombre = user.user_metadata?.nombre;
-      let rol = user.user_metadata?.rol || 'usuario';
-
-      if (!nombre) {
-        const { data: perfil } = await supabaseApp.from('perfiles').select('*').eq('user_id', user.id).single();
-        if (perfil) {
-          nombre = perfil.nombre;
-          rol = perfil.rol;
-        } else {
-          nombre = email.split('@')[0];
-        }
-      }
-
-      concederAcceso(nombre, rol === 'admin' || rol === 'superadmin' || email === 'maculecale@gmail.com');
+      const { nombre, admin } = await resolverIdentidad(data.user);
+      concederAcceso(nombre, admin);
     } catch (err) {
       alert('Error: ' + err.message);
       btnLoginEmail.textContent = 'Iniciar Sesión';
@@ -131,172 +115,205 @@ if (btnLoginEmail) {
 // Registro de nueva cuenta con Supabase Auth
 if (btnRegisterEmail) {
   btnRegisterEmail.addEventListener('click', async () => {
-    const nombre = (loginNombreReg ? loginNombreReg.value : '').trim();
-    const email = (loginEmail.value || '').trim();
+    if (loginNombreReg.style.display === 'none') {
+      loginNombreReg.style.display = 'block';
+      loginNombreReg.focus();
+      btnRegisterEmail.textContent = 'Confirmar Registro';
+      return;
+    }
+
+    const nombre = loginNombreReg.value.trim();
+    const email = loginEmail.value.trim();
     const password = loginPassword.value;
 
     if (!nombre) return alert('Por favor, introduce tu nombre para el cuadrante.');
-    if (!email || !password || password.length < 6) return alert('Introduce un correo y contraseña (mínimo 6 caracteres).');
+    if (!email || password.length < 8) return alert('Introduce un correo y una contraseña (mínimo 8 caracteres).');
 
     btnRegisterEmail.textContent = 'Registrando...';
     try {
       const { data, error } = await supabaseApp.auth.signUp({
         email,
         password,
-        options: { data: { nombre: nombre, rol: email === 'maculecale@gmail.com' ? 'superadmin' : 'usuario' } }
+        options: { data: { nombre }, emailRedirectTo: window.location.origin }
       });
-      btnRegisterEmail.textContent = 'Crear Cuenta';
-
+      btnRegisterEmail.textContent = 'Registrarse';
       if (error) return alert('🚨 Error al registrar cuenta: ' + error.message);
 
-      alert(`🎉 ¡Cuenta creada con éxito! Bienvenido/a, ${nombre}.`);
-      if (data.session && data.user) {
-        miUserId = data.user.id;
-        concederAcceso(nombre, email === 'maculecale@gmail.com');
+      if (data.session) {
+        alert(`🎉 ¡Cuenta creada! Bienvenido, ${nombre}.`);
+        const id = await resolverIdentidad(data.user);
+        concederAcceso(id.nombre, id.admin);
       } else {
-        alert('Por favor, revisa tu correo electrónico para confirmar la cuenta antes de iniciar sesión.');
+        alert('🎉 Cuenta creada. Revisa tu correo para confirmarla y luego inicia sesión.');
       }
     } catch (err) {
       alert('Error en el registro: ' + err.message);
-      btnRegisterEmail.textContent = 'Crear Cuenta';
+      btnRegisterEmail.textContent = 'Registrarse';
     }
   });
 }
 
-// Recuperar contraseña
+// Recuperar contraseña (el enlace vuelve a la app y pide la nueva clave)
 if (linkRecuperarPass) {
   linkRecuperarPass.addEventListener('click', async (e) => {
     e.preventDefault();
     const email = prompt('Introduce tu correo electrónico para enviarte el enlace de recuperación:');
-    if (!email || !email.trim()) return;
-
-    const { error } = await supabaseApp.auth.resetPasswordForEmail(email.trim());
+    if (!email) return;
+    const { error } = await supabaseApp.auth.resetPasswordForEmail(email.trim(), { redirectTo: window.location.origin });
     if (error) alert('Error: ' + error.message);
     else alert('📧 Te hemos enviado un correo con instrucciones para restablecer tu contraseña.');
   });
 }
 
-// PASSKEYS: WEBAUTHN REAL CON VERIFICACIÓN EN SERVIDOR (SIN BYPASS NI PIN)
-async function registrarPasskey(nombreUser) {
-  if (!window.PublicKeyCredential) {
-    return alert('Tu navegador o dispositivo no soporta autenticación biométrica / Passkeys.');
+supabaseApp.auth.onAuthStateChange(async (evento) => {
+  if (evento === 'PASSWORD_RECOVERY') {
+    const nueva = prompt('Escribe tu nueva contraseña (mínimo 8 caracteres):');
+    if (nueva && nueva.length >= 8) {
+      const { error } = await supabaseApp.auth.updateUser({ password: nueva });
+      alert(error ? 'Error: ' + error.message : '✅ Contraseña actualizada.');
+    } else if (nueva) {
+      alert('La contraseña debe tener al menos 8 caracteres.');
+    }
   }
+});
 
-  const { data: { session } } = await supabaseApp.auth.getSession();
-  if (!session || !session.user) {
-    return alert('Debes iniciar sesión con tu correo antes de registrar una Passkey.');
+// FACE ID / TOUCH ID como bloqueo biométrico del dispositivo.
+// La identidad la sigue dando la sesión de Supabase; la biometría solo protege abrir la app en este móvil.
+const LOCK_STORAGE_KEY = 'kedadas_biometria';
+const aBase64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const deBase64 = (b64) => Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+
+function leerBloqueoBiometrico() {
+  try { return JSON.parse(localStorage.getItem(LOCK_STORAGE_KEY)); } catch (e) { return null; }
+}
+
+const aB64u = (buf) => aBase64(buf).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const deB64u = (str) => deBase64(str.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (str.length % 4)) % 4));
+
+async function postJSON(url, cuerpo, conSesion) {
+  const headers = conSesion ? await cabecerasAuth() : { 'Content-Type': 'application/json' };
+  const res = await fetch(url, { method: 'POST', headers, body: cuerpo ? JSON.stringify(cuerpo) : undefined });
+  const datos = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(datos.error || `Error ${res.status}`);
+  return datos;
+}
+
+// Registrar una passkey REAL: la clave pública queda guardada y verificada en el servidor
+async function registrarPasskey() {
+  if (!window.PublicKeyCredential) {
+    return alert('Tu navegador o dispositivo no soporta biometría / Passkeys.');
   }
+  const { data: { session } } = await supabaseApp.auth.getSession();
+  if (!session) return alert('Primero inicia sesión con tu correo y contraseña.');
 
   try {
-    const challenge = new Uint8Array(32);
-    window.crypto.getRandomValues(challenge);
-    const userId = new TextEncoder().encode(session.user.id);
-
+    const o = await postJSON('/api/passkey-register-options', null, true);
     const credential = await navigator.credentials.create({
       publicKey: {
-        challenge,
-        rp: { name: "Kedadas", id: window.location.hostname },
-        user: {
-          id: userId,
-          name: session.user.email || nombreUser,
-          displayName: nombreUser
-        },
-        pubKeyCredParams: [
-          { alg: -7, type: "public-key" },
-          { alg: -257, type: "public-key" }
-        ],
-        authenticatorSelection: {
-          userVerification: "preferred",
-          residentKey: "preferred"
-        },
+        challenge: deB64u(o.challenge),
+        rp: { name: 'Kedadas', id: o.rp.id },
+        user: { id: deB64u(o.user.id), name: o.user.name, displayName: o.user.displayName },
+        pubKeyCredParams: [{ alg: -7, type: 'public-key' }],
+        excludeCredentials: (o.excludeCredentials || []).map(id => ({ id: deB64u(id), type: 'public-key' })),
+        authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'required' },
         timeout: 60000,
-        attestation: "none"
+        attestation: 'none'
       }
     });
+    await postJSON('/api/passkey-register-verify', {
+      token: o.token,
+      attestationObject: aB64u(credential.response.attestationObject),
+      clientDataJSON: aB64u(credential.response.clientDataJSON)
+    }, true);
 
-    if (credential) {
-      const credIdBase64 = btoa(String.fromCharCode(...new Uint8Array(credential.rawId)));
-      localStorage.setItem('kedadas_passkey_id', credIdBase64);
-
-      // Guardar credencial vinculada a la cuenta de Supabase Auth
-      await supabaseApp.from('user_passkeys').upsert({
-        id: credIdBase64,
-        user_id: session.user.id,
-        public_key: credIdBase64,
-        device_name: navigator.userAgent.includes('iPhone') ? 'iPhone' : (navigator.userAgent.includes('Mac') ? 'Mac' : 'Dispositivo')
-      });
-
-      alert(`✅ ¡Passkey vinculada con éxito para ${nombreUser}! Ya puedes acceder con biometría.`);
-    }
+    // Además, bloqueo del dispositivo: pide Face ID al abrir la app con la sesión guardada
+    localStorage.setItem(LOCK_STORAGE_KEY, JSON.stringify({ uid: session.user.id, cred: aBase64(credential.rawId) }));
+    alert('✅ Face ID / Touch ID activado. Ya puedes entrar sin escribir la contraseña.');
   } catch (err) {
+    if (err.name === 'NotAllowedError') return;   // cancelado por el usuario
     console.error(err);
-    alert('No se pudo completar el registro de la Passkey: ' + err.message);
+    alert('No se pudo activar Face ID: ' + err.message);
   }
 }
 
-// Botón de login con Passkey (Autenticación Biométrica Criptográfica sin bypass)
-if (btnLoginFace) {
-  btnLoginFace.addEventListener('click', async () => {
-    if (!window.PublicKeyCredential) {
-      return alert('Tu navegador o dispositivo no soporta autenticación biométrica.');
-    }
-
-    try {
-      const challenge = new Uint8Array(32);
-      window.crypto.getRandomValues(challenge);
-      const credIdBase64 = localStorage.getItem('kedadas_passkey_id');
-
-      const getOptions = {
-        publicKey: {
-          challenge,
-          timeout: 60000,
-          userVerification: "required"
-        }
-      };
-
-      if (credIdBase64) {
-        const rawId = Uint8Array.from(atob(credIdBase64), c => c.charCodeAt(0));
-        getOptions.publicKey.allowCredentials = [{ id: rawId, type: 'public-key' }];
-      }
-
-      const assertion = await navigator.credentials.get(getOptions);
-      if (assertion) {
-        const credId = btoa(String.fromCharCode(...new Uint8Array(assertion.rawId)));
-        
-        // Verificar existencia en la base de datos
-        const { data: passkeyRow, error } = await supabaseApp
-          .from('user_passkeys')
-          .select('user_id')
-          .eq('id', credId)
-          .single();
-
-        if (passkeyRow && passkeyRow.user_id) {
-          miUserId = passkeyRow.user_id;
-          const { data: perfil } = await supabaseApp
-            .from('perfiles')
-            .select('*')
-            .eq('user_id', passkeyRow.user_id)
-            .single();
-
-          const nombre = perfil?.nombre || 'Usuario';
-          const esAdmin = perfil?.is_superadmin || perfil?.rol === 'admin';
-          concederAcceso(nombre, esAdmin);
-        } else {
-          alert('Passkey no reconocida en el servidor. Por favor, inicia sesión con tu correo y contraseña.');
-        }
-      }
-    } catch (err) {
-      console.warn('Autenticación biométrica no completada:', err);
-      alert('Autenticación con Passkey no completada. Por favor, inicia sesión con tu correo y contraseña.');
-    }
+// Entrar con passkey: el servidor verifica la firma y entrega la sesión
+async function loginConPasskey() {
+  const o = await postJSON('/api/passkey-login-options', null, false);
+  const a = await navigator.credentials.get({
+    publicKey: { challenge: deB64u(o.challenge), rpId: o.rpId, userVerification: 'required', timeout: 60000 }
   });
+  const d = await postJSON('/api/passkey-login-verify', {
+    id: aB64u(a.rawId),
+    token: o.token,
+    authenticatorData: aB64u(a.response.authenticatorData),
+    clientDataJSON: aB64u(a.response.clientDataJSON),
+    signature: aB64u(a.response.signature)
+  }, false);
+  const { data, error } = await supabaseApp.auth.verifyOtp({ token_hash: d.token_hash, type: 'magiclink' });
+  if (error) throw error;
+  const { nombre, admin } = await resolverIdentidad(data.user);
+  concederAcceso(nombre, admin);
 }
+
+async function verificarBloqueoBiometrico(lock) {
+  try {
+    const assertion = await navigator.credentials.get({
+      publicKey: {
+        challenge: crypto.getRandomValues(new Uint8Array(32)),
+        allowCredentials: [{ id: deBase64(lock.cred), type: 'public-key' }],
+        userVerification: 'required',
+        timeout: 60000
+      }
+    });
+    return !!assertion;
+  } catch (err) {
+    console.log('Biometría cancelada o fallida:', err);
+    return false;
+  }
+}
+
+// Restaura la sesión de Supabase; si hay bloqueo biométrico para ese usuario, lo exige
+async function iniciarDesdeSesion() {
+  const { data: { session } } = await supabaseApp.auth.getSession();
+  if (!session?.user) return false;
+
+  const lock = leerBloqueoBiometrico();
+  if (lock && lock.uid === session.user.id && window.PublicKeyCredential) {
+    const ok = await verificarBloqueoBiometrico(lock);
+    if (!ok) return false;
+  }
+  const { nombre, admin } = await resolverIdentidad(session.user);
+  concederAcceso(nombre, admin);
+  return true;
+}
+
+// Botón de login con Face ID / Touch ID
+btnLoginFace.addEventListener('click', async () => {
+  if (!window.PublicKeyCredential) {
+    return alert('Tu navegador o dispositivo no soporta Face ID / Passkeys.');
+  }
+  try {
+    // Con sesión guardada y bloqueo activo, basta con desbloquear
+    const { data: { session } } = await supabaseApp.auth.getSession();
+    if (session && leerBloqueoBiometrico()) {
+      const entro = await iniciarDesdeSesion();
+      if (!entro) alert('No se pudo desbloquear. Inténtalo de nuevo o entra con tu correo y contraseña.');
+      return;
+    }
+    await loginConPasskey();
+  } catch (err) {
+    if (err.name === 'NotAllowedError') return;   // cancelado por el usuario
+    console.error(err);
+    alert('No se pudo entrar con Face ID: ' + err.message + '\n\nSi aún no lo has activado, entra con tu correo y contraseña y púlsalo en la pestaña Usuarios.');
+  }
+});
 
 // Cerrar sesión
 if (btnLogout) {
   btnLogout.addEventListener('click', async () => {
     if (confirm('¿Cerrar sesión en Kedadas?')) {
       await supabaseApp.auth.signOut();
+      esAdmin = false;
       usuarioLogueado = '';
       miUsuario = '';
       pantallaApp.style.display = 'none';
@@ -308,79 +325,66 @@ if (btnLogout) {
 // Botón para activar Face ID desde la barra de usuario
 if (btnActivarPasskey) {
   btnActivarPasskey.addEventListener('click', () => {
-    registrarPasskey(usuarioLogueado);
+    registrarPasskey();
   });
 }
 
 function concederAcceso(nombreUsuario, rolAdmin) {
-  const nombreFinal = (nombreUsuario || 'Cule').trim();
-  const esCule = (nombreFinal.toLowerCase() === 'cule');
-  usuarioLogueado = nombreFinal; 
-  miUsuario = nombreFinal; 
-  esAdmin = Boolean(rolAdmin || esCule);
+  usuarioLogueado = nombreUsuario; 
+  miUsuario = nombreUsuario; 
+  esAdmin = !!rolAdmin;
   
-  try {
-    localStorage.setItem('kedadas_usuario_activo', usuarioLogueado);
-  } catch(e) {}
-  
-  if (pantallaLogin) pantallaLogin.style.display = 'none'; 
-  if (pantallaApp) pantallaApp.style.display = 'block';
+  pantallaLogin.style.display = 'none'; 
+  pantallaApp.style.display = 'block';
   if (btnEditarUsuarios) btnEditarUsuarios.style.display = 'inline-flex';
   
   if (badgeUsuarioSesion) {
-    badgeUsuarioSesion.textContent = `👤 ${usuarioLogueado}`;
+    badgeUsuarioSesion.textContent = `👤 ${nombreUsuario}`;
   }
   const perfilNombre = document.getElementById('perfil-nombre-conectado');
-  if (perfilNombre) perfilNombre.textContent = usuarioLogueado;
+  if (perfilNombre) perfilNombre.textContent = nombreUsuario;
   const perfilRol = document.getElementById('perfil-rol-badge');
   if (perfilRol) {
     perfilRol.textContent = esAdmin ? 'Administrador' : 'Miembro';
     perfilRol.className = esAdmin ? 'badge-rol-admin' : 'badge-rol-usuario';
   }
 
-  try { poblarSelectorIdentidadUsuario(); } catch(e) { console.warn('Aviso identidad:', e); }
-  try { renderizarSelectorGrupos(); } catch(e) { console.warn('Aviso grupos:', e); }
-  try { renderizarPanelGestionGrupoActivo(); } catch(e) { console.warn('Aviso panel grupo:', e); }
-  try { renderizarSelector(); } catch(e) { console.warn('Aviso selector:', e); }
-  try { actualizarBannerGrupo(); } catch(e) { console.warn('Aviso banner:', e); }
-  try { iniciarCalendario(); } catch(e) { console.warn('Aviso calendario:', e); }
-  try { cargarChatInicial(); } catch(e) { console.warn('Aviso chat:', e); }
-  setTimeout(() => {
-    try { cargarVotaciones(); } catch(e) {}
-  }, 300);
-  try { inicializarPushNotifications(); } catch(e) {}
-  try {
-    if (typeof window.cargarDatosUniversitariosEnPerfil === 'function') {
-      window.cargarDatosUniversitariosEnPerfil();
-    }
-  } catch(e) {}
-  try { actualizarSelectorUbicacionRapido(); } catch(e) {}
+  renderizarSelectorGrupos();
+  renderizarPanelGestionGrupoActivo();
+  renderizarSelector();
+  actualizarBannerGrupo();
+  iniciarCalendario();
+  cargarChatInicial();
+  setTimeout(cargarVotaciones, 300);
+  inicializarPushNotifications();
 }
 
-// --- 3. GESTIÓN DINÁMICA DE USUARIOS (DUAL SUPABASE + LOCAL) ---
-const STORAGE_PERFILES_KEY = 'kedadas_perfiles_v2';
+// --- 3. GESTIÓN DINÁMICA DE USUARIOS Y PINS (DUAL SUPABASE + LOCAL) ---
+const STORAGE_PERFILES_KEY = 'kedadas_perfiles_v3';
+try { localStorage.removeItem('kedadas_perfiles_v2'); } catch (e) {}
 const STORAGE_USUARIOS_KEY = 'listaUsuarios';
 
 const PERFILES_DEFECTO = [
-  { id: 'Cule', nombre: 'Cule', rol: 'admin', es_universitario: false, ciudad_origen: 'Plasencia', ciudad_universidad: 'Madrid', ubicacion_actual: 'origen', password: '1234' },
-  { id: 'Persona 2', nombre: 'Persona 2', rol: 'usuario', es_universitario: true, ciudad_origen: 'Plasencia', ciudad_universidad: 'Madrid', ubicacion_actual: 'universidad', password: '1234' },
-  { id: 'Persona 3', nombre: 'Persona 3', rol: 'usuario', es_universitario: false, ciudad_origen: 'Plasencia', ciudad_universidad: '', ubicacion_actual: 'origen', password: '1234' },
-  { id: 'Persona 4', nombre: 'Persona 4', rol: 'usuario', es_universitario: false, ciudad_origen: 'Plasencia', ciudad_universidad: '', ubicacion_actual: 'origen', password: '1234' }
+  { id: 'Cule', nombre: 'Cule', rol: 'admin' },
+  { id: 'Persona 2', nombre: 'Persona 2', rol: 'usuario' },
+  { id: 'Persona 3', nombre: 'Persona 3', rol: 'usuario' },
+  { id: 'Persona 4', nombre: 'Persona 4', rol: 'usuario' }
 ];
 
-let listaPerfiles = [];
+let listaPerfiles = [...PERFILES_DEFECTO];
 let usuarios = ['Cule', 'Persona 2', 'Persona 3', 'Persona 4'];
-
-// Variable para el filtro de coincidencia según lugar de quedada ('todos' | 'origen' | 'universidad')
-let filtroLugarQuedada = 'todos';
 
 // Elementos del panel desplegable en línea
 const flechaDesplegableUsuarios = document.getElementById('flecha-desplegable-usuarios');
 const panelDesplegableUsuarios = document.getElementById('panel-desplegable-usuarios');
 const btnAbrirModalCompletoUsuarios = document.getElementById('btn-abrir-modal-completo-usuarios');
 const selectPersonaAEditar = document.getElementById('select-persona-a-editar');
+const inputPinEditarDesplegable = document.getElementById('input-pin-editar-desplegable');
+const btnToggleEyeDesplegable = document.getElementById('btn-toggle-eye-desplegable');
+const btnGuardarPinDesplegable = document.getElementById('btn-guardar-pin-desplegable');
 const btnBorrarPersonaDesplegable = document.getElementById('btn-borrar-persona-desplegable');
 const nuevoNombreDesplegable = document.getElementById('nuevo-nombre-desplegable');
+const nuevoPinDesplegable = document.getElementById('nuevo-pin-desplegable');
 const nuevoRolDesplegable = document.getElementById('nuevo-rol-desplegable');
 const btnCrearUsuarioDesplegable = document.getElementById('btn-crear-usuario-desplegable');
 
@@ -390,8 +394,19 @@ const btnCerrarModalUsuarios = document.getElementById('btn-cerrar-modal-usuario
 const btnCerrarGestionUser = document.getElementById('btn-cerrar-gestion-user');
 const listaUsuariosGestion = document.getElementById('lista-usuarios-gestion');
 const nuevoUserNombre = document.getElementById('nuevo-user-nombre');
+const nuevoUserPin = document.getElementById('nuevo-user-pin');
 const nuevoUserRol = document.getElementById('nuevo-user-rol');
 const btnCrearUsuario = document.getElementById('btn-crear-usuario');
+
+// Modal rápido crear/cambiar PIN en login
+const modalCrearPin = document.getElementById('modal-crear-pin');
+const linkCrearMiPin = document.getElementById('link-crear-mi-pin');
+const btnCerrarModalPin = document.getElementById('btn-cerrar-modal-pin');
+const pinCrearNombreSel = document.getElementById('pin-crear-nombre-sel');
+const pinCrearNombre = document.getElementById('pin-crear-nombre');
+const pinCrearValor = document.getElementById('pin-crear-valor');
+const btnToggleEyeCrearPin = document.getElementById('btn-toggle-eye-crear-pin');
+const btnGuardarMiPin = document.getElementById('btn-guardar-mi-pin');
 
 // Filtro de usuarios para coincidencias
 const listaFiltroCoincidencias = document.getElementById('coincidencias-usuarios-lista');
@@ -406,128 +421,44 @@ function guardarPerfilesLocales() {
   localStorage.setItem(STORAGE_USUARIOS_KEY, JSON.stringify(usuarios));
 }
 
-// Cargar usuarios desde almacenamiento local y sincronizar con Supabase
+// Cargar personas: Supabase manda; la copia local es solo un respaldo sin datos sensibles
 async function cargarUsuariosDesdeBD() {
-  // 1. Cargar datos locales primero para garantizar respuesta instantánea y sin fallos
   try {
-    const perfilesGuardados = JSON.parse(localStorage.getItem(STORAGE_PERFILES_KEY));
-    if (Array.isArray(perfilesGuardados) && perfilesGuardados.length > 0) {
-      listaPerfiles = perfilesGuardados;
-    } else {
-      const usuariosGuardados = JSON.parse(localStorage.getItem(STORAGE_USUARIOS_KEY));
-      if (Array.isArray(usuariosGuardados) && usuariosGuardados.length > 0) {
-        listaPerfiles = usuariosGuardados.map(u => ({
-          id: u,
-          nombre: u,
-          rol: u === 'Cule' ? 'admin' : 'usuario'
-        }));
-      } else {
-        listaPerfiles = [...PERFILES_DEFECTO];
-      }
-    }
+    const guardados = JSON.parse(localStorage.getItem(STORAGE_PERFILES_KEY));
+    listaPerfiles = (Array.isArray(guardados) && guardados.length > 0) ? guardados : [...PERFILES_DEFECTO];
   } catch (e) {
     listaPerfiles = [...PERFILES_DEFECTO];
   }
 
-  // Asegurar que Cule siempre exista con ubicación en Plasencia
-  if (!listaPerfiles.some(p => p && p.nombre && p.nombre.toLowerCase() === 'cule')) {
-    listaPerfiles.unshift({ id: 'Cule', nombre: 'Cule', rol: 'admin', ciudad_origen: 'Plasencia', password: '1234' });
-  }
-
-  // Forzar que Cule y perfiles residuales usen Plasencia y tengan contraseña
-  listaPerfiles.forEach(p => {
-    if (!p) return;
-    if (p.nombre && p.nombre.toLowerCase() === 'cule') {
-      p.ciudad_origen = 'Plasencia';
-    } else if (p.ciudad_origen === 'Toledo' || !p.ciudad_origen) {
-      p.ciudad_origen = 'Plasencia';
-    }
-    if (!p.password) {
-      const stored = localStorage.getItem(`kedadas_pass_${(p.nombre || '').toLowerCase()}`);
-      p.password = stored || '1234';
-    }
-  });
-
-  guardarPerfilesLocales();
-
-  // 2. Sincronizar en segundo plano con Supabase si está disponible
   try {
-    const { data, error } = await supabaseApp.from('perfiles').select('*').order('created_at', { ascending: true });
+    const { data, error } = await supabaseApp.from('perfiles')
+      .select('id,user_id,nombre,rol,is_superadmin,created_at').order('created_at', { ascending: true });
     if (!error && data && data.length > 0) {
-      data.forEach(dbPerfil => {
-        if (!dbPerfil || !dbPerfil.nombre) return;
-        const local = listaPerfiles.find(p => p && p.nombre && p.nombre.toLowerCase() === dbPerfil.nombre.toLowerCase());
-        const dbCiudadOrigen = (dbPerfil.nombre.toLowerCase() === 'cule' || dbPerfil.ciudad_origen === 'Toledo') ? 'Plasencia' : (dbPerfil.ciudad_origen || 'Plasencia');
-        if (local) {
-          if (dbPerfil.rol) local.rol = dbPerfil.rol;
-          if (dbPerfil.es_universitario !== undefined) local.es_universitario = dbPerfil.es_universitario;
-          local.ciudad_origen = dbCiudadOrigen;
-          if (dbPerfil.ciudad_universidad) local.ciudad_universidad = dbPerfil.ciudad_universidad;
-          if (dbPerfil.ubicacion_actual) local.ubicacion_actual = dbPerfil.ubicacion_actual;
-          if (dbPerfil.password) local.password = dbPerfil.password;
-        } else {
-          listaPerfiles.push({
-            id: dbPerfil.id || dbPerfil.nombre,
-            nombre: dbPerfil.nombre,
-            rol: dbPerfil.rol || 'usuario',
-            es_universitario: !!dbPerfil.es_universitario,
-            ciudad_origen: dbCiudadOrigen,
-            ciudad_universidad: dbPerfil.ciudad_universidad || '',
-            ubicacion_actual: dbPerfil.ubicacion_actual || 'origen',
-            password: dbPerfil.password || '1234'
-          });
-        }
-      });
-      guardarPerfilesLocales();
+      listaPerfiles = data.map(p => ({ id: p.id, user_id: p.user_id, nombre: p.nombre, rol: (p.is_superadmin || p.rol === 'admin' || p.rol === 'superadmin') ? 'admin' : 'usuario' }));
     }
   } catch (err) {
     console.warn('Aviso sincronización Supabase perfiles:', err);
   }
 
-  // Sincronizar actualización de Plasencia en Supabase
-  try {
-    await supabaseApp.from('perfiles')
-      .update({ ciudad_origen: 'Plasencia' })
-      .or('ciudad_origen.eq.Toledo,nombre.ilike.cule');
-  } catch(e) {}
-
-  try { renderizarSelectoresUsuarios(); } catch(e) { console.warn(e); }
-  try { renderizarFiltroCoincidencias(); } catch(e) { console.warn(e); }
-  try { actualizarEdicionPersonaDesplegable(); } catch(e) { console.warn(e); }
-  try { renderizarPanelGestionUsuarios(); } catch(e) { console.warn(e); }
+  guardarPerfilesLocales();
+  renderizarSelectoresUsuarios();
+  renderizarFiltroCoincidencias();
+  renderizarPanelGestionUsuarios();
 }
-
-// Actualiza el desplegable de edición rápida de personas
-function actualizarEdicionPersonaDesplegable() {
-  if (selectPersonaAEditar) {
-    const valActual = selectPersonaAEditar.value;
-    selectPersonaAEditar.innerHTML = '';
-    (usuarios || []).forEach(u => {
-      const opt = document.createElement('option');
-      opt.value = u;
-      opt.textContent = `👤 ${u}`;
-      selectPersonaAEditar.appendChild(opt);
-    });
-    if (usuarios.includes(valActual)) selectPersonaAEditar.value = valActual;
-    else if (usuarios.length > 0) selectPersonaAEditar.value = usuarios[0];
-  }
-}
-const poblarEditorPersonaDesplegable = actualizarEdicionPersonaDesplegable;
 
 // Actualizar todos los selectores desplegables de usuarios de la aplicación
 function renderizarSelectoresUsuarios() {
-  // Selector en pantalla de login (si existiera elemento legado)
-  const elLoginUsuario = document.getElementById('login-usuario');
-  if (elLoginUsuario) {
-    const valActual = elLoginUsuario.value;
-    elLoginUsuario.innerHTML = '';
+  // Selector en pantalla de login
+  if (loginUsuario) {
+    const valActual = loginUsuario.value;
+    loginUsuario.innerHTML = '';
     usuarios.forEach(u => {
       const opt = document.createElement('option');
       opt.value = u;
       opt.textContent = u;
-      elLoginUsuario.appendChild(opt);
+      loginUsuario.appendChild(opt);
     });
-    if (usuarios.includes(valActual)) elLoginUsuario.value = valActual;
+    if (usuarios.includes(valActual)) loginUsuario.value = valActual;
   }
 
   // Selector en pantalla principal de la app (Solo miembros del grupo activo)
@@ -538,13 +469,7 @@ function renderizarSelectoresUsuarios() {
     miembrosGrupo.forEach(u => {
       const opt = document.createElement('option');
       opt.value = u;
-      const esPropio = u.toLowerCase() === (usuarioLogueado || '').toLowerCase();
-      if (esPropio) {
-        opt.textContent = `👤 ${u} (Mi horario)`;
-      } else {
-        const compartido = (typeof tienePermisoCalendario === 'function') && tienePermisoCalendario(u, usuarioLogueado);
-        opt.textContent = compartido ? `🔓 ${u} (Compartido)` : `🔒 ${u} (Privado)`;
-      }
+      opt.textContent = u;
       selectorUsuario.appendChild(opt);
     });
     if (miembrosGrupo.includes(miUsuario)) {
@@ -558,568 +483,101 @@ function renderizarSelectoresUsuarios() {
     }
   }
 
-  // Selector de Grupo en la barra superior del Cuadrante (Cambio directo de grupo)
-  const cuadranteSelectorGrupo = document.getElementById('cuadrante-selector-grupo');
-  if (cuadranteSelectorGrupo) {
-    const visibles = (typeof obtenerGruposVisibles === 'function') ? obtenerGruposVisibles(usuarioLogueado) : listaGrupos;
-    cuadranteSelectorGrupo.innerHTML = '';
-    visibles.forEach(g => {
+  // Selector en el panel desplegable de edición
+  if (selectPersonaAEditar) {
+    const valActual = selectPersonaAEditar.value;
+    selectPersonaAEditar.innerHTML = '';
+    usuarios.forEach(u => {
       const opt = document.createElement('option');
-      const nombreG = obtenerNombreGrupo(g);
-      opt.value = nombreG;
-      opt.textContent = `${g.icono || '👥'} ${nombreG}`;
-      if (nombreG.toLowerCase() === (grupoActivo || '').toLowerCase()) opt.selected = true;
-      cuadranteSelectorGrupo.appendChild(opt);
+      opt.value = u;
+      opt.textContent = `👤 ${u}`;
+      selectPersonaAEditar.appendChild(opt);
     });
-
-    if (!cuadranteSelectorGrupo.dataset.listenerAttached) {
-      cuadranteSelectorGrupo.dataset.listenerAttached = 'true';
-      cuadranteSelectorGrupo.addEventListener('change', (e) => {
-        cambiarGrupo(e.target.value);
-      });
-    }
+    if (usuarios.includes(valActual)) selectPersonaAEditar.value = valActual;
+    else if (usuarios.length > 0) selectPersonaAEditar.value = usuarios[0];
   }
 
-  actualizarEdicionPersonaDesplegable();
-  poblarSelectorIdentidadUsuario();
-}
-
-// Selector de identidad activa en la barra superior (Cambio con 1 toque)
-function poblarSelectorIdentidadUsuario() {
-  const selector = document.getElementById('selector-usuario-identidad');
-  if (!selector) return;
-
-  const setNombres = new Set();
-  setNombres.add('Cule');
-  if (usuarioLogueado) setNombres.add(usuarioLogueado);
-
-  (usuarios || []).forEach(u => { if (u) setNombres.add(u.trim()); });
-  (listaPerfiles || []).forEach(p => { if (p && p.nombre) setNombres.add(p.nombre.trim()); });
-  (listaGrupos || []).forEach(g => {
-    const norm = (typeof normalizarGrupo === 'function') ? normalizarGrupo(g) : g;
-    if (norm && Array.isArray(norm.miembros)) {
-      norm.miembros.forEach(m => { if (m) setNombres.add(m.trim()); });
-    }
-  });
-
-  const nombresMap = new Map();
-  setNombres.forEach(n => {
-    const key = n.toLowerCase();
-    if (!nombresMap.has(key) || n === 'Cule') {
-      nombresMap.set(key, n);
-    }
-  });
-
-  const arrayNombres = Array.from(nombresMap.values());
-  const listaOrdenada = ['Cule', ...arrayNombres.filter(n => n.toLowerCase() !== 'cule').sort()];
-
-  selector.innerHTML = '';
-  listaOrdenada.forEach(n => {
-    const opt = document.createElement('option');
-    opt.value = n;
-    const esCule = (n.toLowerCase() === 'cule');
-    opt.textContent = esCule ? `👑 ${n} (Admin)` : `👤 ${n}`;
-    if (usuarioLogueado && n.toLowerCase() === usuarioLogueado.toLowerCase()) {
-      opt.selected = true;
-    }
-    selector.appendChild(opt);
-  });
-
-// =========================================================================
-// --- GESTIÓN DE CONTRASEÑAS POR USUARIO Y PROTECCIÓN DE ACCESO -----------
-// =========================================================================
-function obtenerContrasenaUsuario(nombre) {
-  if (!nombre) return '1234';
-  const nombreLimpio = String(nombre).trim().toLowerCase();
-
-  // 1. Buscar en listaPerfiles
-  const p = (listaPerfiles || []).find(item => item && item.nombre && item.nombre.toLowerCase() === nombreLimpio);
-  if (p && p.password) return String(p.password).trim();
-
-  // 2. Buscar en almacenamiento local por usuario
-  try {
-    const custom = localStorage.getItem(`kedadas_pass_${nombreLimpio}`);
-    if (custom) return String(custom).trim();
-  } catch(e) {}
-
-  return '1234';
-}
-
-async function guardarContrasenaUsuario(nombre, nuevoPass) {
-  if (!nombre || !nuevoPass) return false;
-  const nombreLimpio = String(nombre).trim();
-  const passLimpio = String(nuevoPass).trim();
-
-  // 1. Actualizar perfil local
-  const p = (listaPerfiles || []).find(item => item && item.nombre && item.nombre.toLowerCase() === nombreLimpio.toLowerCase());
-  if (p) {
-    p.password = passLimpio;
-    guardarPerfilesLocales();
-  }
-
-  // 2. Guardar en localStorage
-  try {
-    localStorage.setItem(`kedadas_pass_${nombreLimpio.toLowerCase()}`, passLimpio);
-  } catch(e) {}
-
-  // 3. Sincronizar en Supabase
-  try {
-    await supabaseApp.from('perfiles').update({ password: passLimpio }).ilike('nombre', nombreLimpio);
-  } catch(e) {}
-
-  return true;
-}
-
-function verificarContrasenaUsuario(nombre, passIntroducido) {
-  if (!passIntroducido) return false;
-  const passCorrecto = obtenerContrasenaUsuario(nombre);
-  return String(passIntroducido).trim() === passCorrecto;
-}
-
-// Solicitar contraseña obligatoria antes de conmutar de usuario
-async function solicitarCambioUsuarioConContrasena(nuevoNombre) {
-  if (!nuevoNombre) return false;
-  const target = nuevoNombre.trim();
-  if (target.toLowerCase() === (usuarioLogueado || '').toLowerCase()) return true;
-
-  const pass = prompt(`🔒 Acceso Protegido por Contraseña\n\nIntroduce la contraseña de "${target}" para acceder a su cuenta y cuadrante:\n(Clave por defecto: 1234 si no la ha cambiado)`);
-
-  if (pass === null || pass === '') {
-    return false;
-  }
-
-  if (!verificarContrasenaUsuario(target, pass)) {
-    alert(`❌ Contraseña incorrecta para "${target}".\nPor motivos de privacidad, no puedes acceder al horario ni a la cuenta de este usuario.`);
-    return false;
-  }
-
-  cambiarUsuarioActivo(target);
-  if (typeof confetti === 'function') confetti({ particleCount: 40, spread: 60 });
-  alert(`✅ ¡Contraseña correcta! Has entrado como "${target}".`);
-  return true;
-}
-
-  if (!selector.dataset.listenerAttached) {
-    selector.dataset.listenerAttached = 'true';
-    selector.addEventListener('change', async (e) => {
-      const nuevo = e.target.value;
-      if (!nuevo || nuevo.trim().toLowerCase() === (usuarioLogueado || '').toLowerCase()) return;
-      const ok = await solicitarCambioUsuarioConContrasena(nuevo);
-      if (!ok) {
-        poblarSelectorIdentidadUsuario();
-      }
+  // Selector en el modal de crear/cambiar PIN
+  if (pinCrearNombreSel) {
+    const valActual = pinCrearNombreSel.value;
+    pinCrearNombreSel.innerHTML = '<option value="">-- Elige una persona existente --</option>';
+    usuarios.forEach(u => {
+      const opt = document.createElement('option');
+      opt.value = u;
+      opt.textContent = u;
+      pinCrearNombreSel.appendChild(opt);
     });
-  }
-
-  const btnConmutarCule = document.getElementById('btn-conmutar-a-cule');
-  if (btnConmutarCule && !btnConmutarCule.dataset.listenerAttached) {
-    btnConmutarCule.dataset.listenerAttached = 'true';
-    btnConmutarCule.addEventListener('click', async () => {
-      if ((usuarioLogueado || '').toLowerCase() === 'cule') return;
-      await solicitarCambioUsuarioConContrasena('Cule');
-    });
+    if (usuarios.includes(valActual)) pinCrearNombreSel.value = valActual;
   }
 }
 
-// Conmutar instantáneamente la identidad activa del usuario conectado
-function cambiarUsuarioActivo(nuevoNombre) {
-  if (!nuevoNombre) return;
-  const nombreLimpio = nuevoNombre.trim();
-  const esCule = (nombreLimpio.toLowerCase() === 'cule');
-
-  usuarioLogueado = nombreLimpio;
-  miUsuario = nombreLimpio;
-  esAdmin = esCule;
-
-  try {
-    localStorage.setItem('kedadas_usuario_activo', usuarioLogueado);
-  } catch(e) {}
-
-  const badgeSesion = document.getElementById('badge-usuario-sesion');
-  if (badgeSesion) {
-    badgeSesion.textContent = `👤 ${usuarioLogueado}`;
+// Sincronizar campo de PIN del panel desplegable con la persona seleccionada
+function actualizarEdicionPersonaDesplegable() {
+  if (!selectPersonaAEditar || !inputPinEditarDesplegable) return;
+  const nombreSel = selectPersonaAEditar.value;
+  const perfil = listaPerfiles.find(p => p.nombre === nombreSel);
+  if (perfil) {
+    inputPinEditarDesplegable.value = perfil.pin || '';
   }
-  const perfilNombre = document.getElementById('perfil-nombre-conectado');
-  if (perfilNombre) perfilNombre.textContent = usuarioLogueado;
-  const perfilRol = document.getElementById('perfil-rol-badge');
-  if (perfilRol) {
-    perfilRol.textContent = esAdmin ? 'Administrador' : 'Miembro';
-    perfilRol.className = esAdmin ? 'badge-rol-admin' : 'badge-rol-usuario';
-  }
-
-  try { poblarSelectorIdentidadUsuario(); } catch(e) {}
-  try { renderizarSelectorGrupos(); } catch(e) {}
-  try { renderizarPanelGestionGrupoActivo(); } catch(e) {}
-  try { renderizarSelectoresUsuarios(); } catch(e) {}
-  try { renderizarFiltroCoincidencias(true); } catch(e) {}
-  try { iniciarCalendario(); } catch(e) {}
-  try { actualizarBannerPrivacidadCal(); } catch(e) {}
-  try {
-    if (typeof window.cargarDatosUniversitariosEnPerfil === 'function') {
-      window.cargarDatosUniversitariosEnPerfil();
-    }
-  } catch(e) {}
-  try {
-    if (typeof actualizarSelectorUbicacionRapido === 'function') {
-      actualizarSelectorUbicacionRapido();
-    }
-  } catch(e) {}
 }
 
-// Crear un nuevo usuario en la lista de personas
-async function crearNuevoUsuario(nombre, rol = 'usuario') {
-  const nombreLimpio = (nombre || '').trim();
-
-  if (!nombreLimpio) {
-    alert('Por favor, indica un nombre.');
-    return false;
-  }
-  if (usuarios.some(u => u.toLowerCase() === nombreLimpio.toLowerCase())) {
-    alert(`Ya existe una persona llamada "${nombreLimpio}".`);
-    return false;
-  }
-
-  const nuevoPerfil = {
-    id: nombreLimpio,
-    nombre: nombreLimpio,
-    rol: rol
-  };
-
-  // 1. Guardado local inmediato
-  listaPerfiles.push(nuevoPerfil);
-  guardarPerfilesLocales();
-
-  // 2. Guardado en Supabase
-  try {
-    await supabaseApp.from('perfiles').insert({
-      nombre: nombreLimpio,
-      rol: rol
-    });
-  } catch (err) {
-    console.warn('Aviso guardando nuevo usuario en Supabase:', err);
-  }
-
-  renderizarSelectoresUsuarios();
-  if (selectPersonaAEditar) selectPersonaAEditar.value = nombreLimpio;
-  renderizarPanelGestionUsuarios();
-  renderizarFiltroCoincidencias();
-  iniciarCalendario();
-
-  return true;
+// Las personas ahora se crean registrándose (o con código de invitación) y su contraseña la gestiona Supabase Auth.
+async function actualizarPinUsuario() {
+  alert('Los PIN ya no existen. Cada persona gestiona su contraseña desde "¿Olvidaste tu contraseña?".');
+  return false;
+}
+async function crearNuevoUsuario() {
+  alert('Para añadir a alguien, compártele un código de invitación del grupo: se registrará con su propio correo y contraseña.');
+  return false;
+}
+async function eliminarUsuario() {
+  alert('Para quitar a alguien, sácalo del grupo desde la pestaña Grupos.');
+  return false;
 }
 
-// Eliminar a una persona del cuadrante
-async function eliminarUsuario(nombre) {
-  if (nombre === 'Cule') {
-    alert('No puedes eliminar al usuario principal (Cule).');
-    return false;
-  }
-  if (!confirm(`¿Seguro que deseas eliminar a "${nombre}" del cuadrante y de los grupos?`)) {
-    return false;
-  }
-
-  listaPerfiles = listaPerfiles.filter(p => p.nombre.toLowerCase() !== nombre.toLowerCase());
-  guardarPerfilesLocales();
-
-  try {
-    await supabaseApp.from('perfiles').delete().eq('nombre', nombre);
-  } catch (err) {
-    console.warn('Aviso eliminando usuario en Supabase:', err);
-  }
-
-  if (miUsuario.toLowerCase() === nombre.toLowerCase()) {
-    miUsuario = 'Cule';
-  }
-
-  renderizarSelectoresUsuarios();
-  actualizarEdicionPersonaDesplegable();
-  renderizarPanelGestionUsuarios();
-  renderizarFiltroCoincidencias();
-  iniciarCalendario();
-  return true;
-}
-
-// Renderizar lista interactiva en la modal completa de usuarios
-// Renderizar lista interactiva en la modal completa de usuarios
+// Lista de personas (solo lectura)
 function renderizarPanelGestionUsuarios() {
   if (!listaUsuariosGestion) return;
   listaUsuariosGestion.innerHTML = '';
-
   if (listaPerfiles.length === 0) {
     listaUsuariosGestion.innerHTML = '<p class="modal-desc-sub">No hay usuarios dados de alta.</p>';
     return;
   }
-
   listaPerfiles.forEach(p => {
     const card = document.createElement('div');
     card.className = 'usuario-card-item';
-
     const info = document.createElement('div');
     info.className = 'user-card-info';
-
     const avatar = document.createElement('div');
     avatar.className = 'user-avatar-initial';
     avatar.textContent = (p.nombre || '?').charAt(0).toUpperCase();
-
     const textWrap = document.createElement('div');
-    textWrap.innerHTML = `
-      <div class="user-name-text">${escapeHtml(p.nombre)}</div>
-      <span class="user-rol-tag ${p.rol === 'admin' ? 'rol-admin' : 'rol-user'}">${p.rol === 'admin' ? 'Admin' : 'Usuario'}</span>
-    `;
-
+    const nombre = document.createElement('div');
+    nombre.className = 'user-name-text';
+    nombre.textContent = p.nombre;
+    const rol = document.createElement('span');
+    rol.className = `user-rol-tag ${p.rol === 'admin' ? 'rol-admin' : 'rol-user'}`;
+    rol.textContent = p.rol === 'admin' ? 'Admin' : 'Usuario';
+    textWrap.appendChild(nombre);
+    textWrap.appendChild(rol);
     info.appendChild(avatar);
     info.appendChild(textWrap);
-
-    const controls = document.createElement('div');
-    controls.className = 'user-card-controls';
-
-    if (p.nombre !== 'Cule') {
-      const btnBorrar = document.createElement('button');
-      btnBorrar.type = 'button';
-      btnBorrar.className = 'btn-borrar-user-mini';
-      btnBorrar.textContent = '🗑️';
-      btnBorrar.title = 'Eliminar a ' + escapeHtml(p.nombre);
-      btnBorrar.addEventListener('click', async () => {
-        await eliminarUsuario(p.nombre);
-      });
-      controls.appendChild(btnBorrar);
-    }
-
     card.appendChild(info);
-    card.appendChild(controls);
     listaUsuariosGestion.appendChild(card);
   });
 }
 
-// =========================================================================
-// SISTEMA DE UBICACIÓN DINÁMICA (ORIGEN, ESTUDIO/TRABAJO, VIAJE)
-// =========================================================================
-
-function normalizarUbicacion(loc) {
-  if (!loc) return 'origen';
-  const l = loc.toLowerCase().trim();
-  if (l === 'viaje') return 'viaje';
-  if (l === 'estudio/trabajo' || l === 'estudio_trabajo' || l === 'universidad' || l === 'trabajo' || l === 'estudio') {
-    return 'estudio/trabajo';
-  }
-  return 'origen';
-}
-
-function obtenerIconoUbicacion(nombreUsuario) {
-  const p = listaPerfiles.find(item => item.nombre.toLowerCase() === (nombreUsuario || '').toLowerCase());
-  const loc = normalizarUbicacion(p ? (p.current_location || p.ubicacion_actual) : 'origen');
-  const isUniv = p && p.es_universitario;
-  const ciudadDestino = (p && (p.ciudad_destino || p.ciudad_universidad)) || '';
-  const ciudadOrigen = (p && p.ciudad_origen && p.ciudad_origen !== 'Toledo') ? p.ciudad_origen : 'Plasencia';
-
-  if (loc === 'viaje') {
-    return {
-      loc: 'viaje',
-      icon: '✈️',
-      title: `${nombreUsuario || 'Usuario'} está de viaje / fuera`,
-      text: 'De Viaje',
-      pillClass: 'en-viaje'
-    };
-  }
-  if (loc === 'estudio/trabajo') {
-    const label = ciudadDestino ? `En ${ciudadDestino}` : (isUniv ? 'En Campus' : 'Estudio/Trabajo');
-    return {
-      loc: 'estudio/trabajo',
-      icon: isUniv ? '🎒' : '💼',
-      title: `${nombreUsuario || 'Usuario'} desplazado/a en ${ciudadDestino || 'su ciudad de estudio/trabajo'}`,
-      text: label,
-      pillClass: 'en-estudio'
-    };
-  }
-  return {
-    loc: 'origen',
-    icon: '🏠',
-    title: `${nombreUsuario || 'Usuario'} en ciudad de origen (${ciudadOrigen})`,
-    text: `En ${ciudadOrigen}`,
-    pillClass: 'en-origen'
-  };
-}
-
-function actualizarSelectorUbicacionRapido() {
-  const container = document.getElementById('barra-ubicacion-rapida');
-  if (!container) return;
-
-  const usuarioActivo = usuarioLogueado || miUsuario;
-  const p = listaPerfiles.find(item => item.nombre.toLowerCase() === (usuarioActivo || '').toLowerCase());
-  const loc = normalizarUbicacion(p ? (p.current_location || p.ubicacion_actual) : 'origen');
-
-  const badge = document.getElementById('ubi-rapido-status-badge');
-  const btnOrigen = document.getElementById('btn-ubi-quick-origen');
-  const btnEstudio = document.getElementById('btn-ubi-quick-estudio');
-  const btnViaje = document.getElementById('btn-ubi-quick-viaje');
-
-  if (btnOrigen) btnOrigen.classList.toggle('activo', loc === 'origen');
-  if (btnEstudio) btnEstudio.classList.toggle('activo', loc === 'estudio/trabajo');
-  if (btnViaje) btnViaje.classList.toggle('activo', loc === 'viaje');
-
-  if (badge) {
-    badge.className = 'badge-ubi-status';
-    if (loc === 'origen') {
-      badge.classList.add('ubi-origen');
-      const ciudadO = (p && p.ciudad_origen && p.ciudad_origen !== 'Toledo') ? p.ciudad_origen : 'Plasencia';
-      badge.textContent = `🏠 En Ciudad de Origen (${ciudadO})`;
-    } else if (loc === 'viaje') {
-      badge.classList.add('ubi-viaje');
-      badge.textContent = `✈️ De Viaje / Fuera`;
-    } else {
-      badge.classList.add('ubi-estudio');
-      const ciudad = (p && (p.ciudad_destino || p.ciudad_universidad)) || 'Destino';
-      const icon = (p && p.es_universitario) ? '🎒' : '💼';
-      badge.textContent = `${icon} En Estudio / Trabajo (${ciudad})`;
-    }
-  }
-}
-
-async function cambiarUbicacionRapida(nuevaUbi) {
-  const usuarioActivo = usuarioLogueado || miUsuario;
-  const perfil = listaPerfiles.find(p => p.nombre.toLowerCase() === (usuarioActivo || '').toLowerCase());
-  if (!perfil) return;
-
-  const locNorm = normalizarUbicacion(nuevaUbi);
-
-  // 1. Actualización Optimista Instantánea en la UI
-  perfil.current_location = locNorm;
-  perfil.ubicacion_actual = locNorm;
-  guardarPerfilesLocales();
-  actualizarSelectorUbicacionRapido();
-  renderizarFiltroCoincidencias();
-  renderizarPanelGestionGrupoActivo();
-
-  // 2. Sincronización en segundo plano con Supabase
-  try {
-    const payload = {
-      current_location: locNorm,
-      ubicacion_actual: locNorm,
-      updated_at: new Date().toISOString()
-    };
-    await supabaseApp.from('perfiles')
-      .update(payload)
-      .eq('nombre', perfil.nombre);
-  } catch (err) {
-    console.warn('Aviso guardado Supabase ubicación:', err);
-  }
-}
-
-function inicializarSelectorUbicacionRapido() {
-  const btns = document.querySelectorAll('.ubi-segment-btn');
-  btns.forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.preventDefault();
-      const ubi = btn.dataset.ubi;
-      if (ubi) cambiarUbicacionRapida(ubi);
-    });
-  });
-  actualizarSelectorUbicacionRapido();
-}
-
-function alternarUbicacionUsuario(nombreUsuario) {
-  const perfil = listaPerfiles.find(p => p.nombre.toLowerCase() === (nombreUsuario || '').toLowerCase());
-  if (!perfil) return;
-  const actual = normalizarUbicacion(perfil.current_location || perfil.ubicacion_actual);
-  let siguiente = 'origen';
-  if (actual === 'origen') siguiente = 'estudio/trabajo';
-  else if (actual === 'estudio/trabajo') siguiente = 'viaje';
-  else siguiente = 'origen';
-
-  perfil.current_location = siguiente;
-  perfil.ubicacion_actual = siguiente;
-  guardarPerfilesLocales();
-
-  try {
-    supabaseApp.from('perfiles').update({
-      current_location: siguiente,
-      ubicacion_actual: siguiente,
-      updated_at: new Date().toISOString()
-    }).eq('nombre', perfil.nombre);
-  } catch(e) {}
-
-  actualizarSelectorUbicacionRapido();
-  renderizarFiltroCoincidencias();
-  renderizarPanelGestionGrupoActivo();
-}
-
-function renderizarBannerUbicacionUniversitarios() {
-  const banner = document.getElementById('banner-estado-ubicaciones-grupo');
-  const badgeContador = document.getElementById('badge-contador-univ');
-  if (!banner) return;
-
-  const seleccionados = Array.from(usuariosSeleccionadosCoincidencias);
-  const infoUsuarios = seleccionados.map(u => ({
-    nombre: u,
-    ...obtenerIconoUbicacion(u)
-  }));
-
-  const enOrigen = infoUsuarios.filter(i => i.loc === 'origen');
-  const enEstudio = infoUsuarios.filter(i => i.loc === 'estudio/trabajo');
-  const enViaje = infoUsuarios.filter(i => i.loc === 'viaje');
-
-  if (badgeContador) {
-    badgeContador.textContent = `${enEstudio.length} en estudio/trabajo`;
-  }
-
-  const strOrigen = enOrigen.length > 0 
-    ? enOrigen.map(u => `<strong>${escapeHtml(u.nombre)}</strong>`).join(', ')
-    : '<em style="color:#64748b;">Ninguno</em>';
-  const strEstudio = enEstudio.length > 0 
-    ? enEstudio.map(u => `<strong>${escapeHtml(u.nombre)}</strong> (${escapeHtml(u.text)})`).join(', ')
-    : '<em style="color:#64748b;">Ninguno</em>';
-  const strViaje = enViaje.length > 0 
-    ? enViaje.map(u => `<strong>${escapeHtml(u.nombre)}</strong>`).join(', ')
-    : '';
-
-  banner.innerHTML = `
-    <div>🏠 <strong>En Ciudad de Origen:</strong> ${strOrigen}</div>
-    <div style="margin-top: 4px;">💼 <strong>En Estudio / Trabajo:</strong> ${strEstudio}</div>
-    ${strViaje ? `<div style="margin-top: 4px;">✈️ <strong>De Viaje:</strong> ${strViaje}</div>` : ''}
-  `;
-}
-
-function inicializarSelectorLugarQuedada() {
-  const botones = document.querySelectorAll('#selector-lugar-quedada-grid .btn-filtro-lugar');
-  botones.forEach(btn => {
-    btn.addEventListener('click', () => {
-      botones.forEach(b => b.classList.remove('activo'));
-      btn.classList.add('activo');
-      filtroLugarQuedada = btn.dataset.lugar || 'todos';
-      renderizarBannerUbicacionUniversitarios();
-    });
-  });
-}
-
-let ultimoGrupoFiltroCoincidencias = null;
-
-function renderizarFiltroCoincidencias(forzarTodos = false) {
+function renderizarFiltroCoincidencias() {
   if (!listaFiltroCoincidencias) return;
   listaFiltroCoincidencias.innerHTML = '';
   
   const miembrosGrupo = (typeof obtenerMiembrosGrupo === 'function') ? obtenerMiembrosGrupo(grupoActivo) : usuarios;
 
-  // Actualizar título del filtro indicando claramente el grupo activo
-  const tituloFiltro = document.getElementById('coincidencias-filtro-titulo');
-  if (tituloFiltro) {
-    const grupoObj = (listaGrupos || []).find(g => obtenerNombreGrupo(g).toLowerCase() === (grupoActivo || '').toLowerCase());
-    const icono = grupoObj?.icono || '👥';
-    tituloFiltro.innerHTML = `${icono} ¿Con quién quieres coincidir en <strong>${escapeHtml(grupoActivo)}</strong>?`;
-  }
-
-  // Si ha cambiado de grupo o se solicita forzar todos, seleccionar a TODOS los miembros del nuevo grupo
-  const haCambiadoGrupo = !ultimoGrupoFiltroCoincidencias || ultimoGrupoFiltroCoincidencias.toLowerCase() !== grupoActivo.toLowerCase();
-  if (forzarTodos || haCambiadoGrupo) {
-    usuariosSeleccionadosCoincidencias = new Set(miembrosGrupo);
-    ultimoGrupoFiltroCoincidencias = grupoActivo;
-  } else {
-    // Si sigue en el mismo grupo, mantener la selección actual asegurando que pertenezcan al grupo activo
-    usuariosSeleccionadosCoincidencias = new Set(
-      [...usuariosSeleccionadosCoincidencias].filter(u => miembrosGrupo.includes(u))
-    );
-    if (usuariosSeleccionadosCoincidencias.size === 0 && miembrosGrupo.length > 0) {
-      miembrosGrupo.forEach(u => usuariosSeleccionadosCoincidencias.add(u));
-    }
+  usuariosSeleccionadosCoincidencias = new Set(
+    [...usuariosSeleccionadosCoincidencias].filter(u => miembrosGrupo.includes(u))
+  );
+  if (usuariosSeleccionadosCoincidencias.size === 0) {
+    miembrosGrupo.forEach(u => usuariosSeleccionadosCoincidencias.add(u));
   }
 
   miembrosGrupo.forEach(u => {
@@ -1140,29 +598,12 @@ function renderizarFiltroCoincidencias(forzarTodos = false) {
         usuariosSeleccionadosCoincidencias.delete(u);
         label.classList.remove('activo');
       }
-      renderizarBannerUbicacionUniversitarios();
     });
 
     label.appendChild(check);
     label.appendChild(document.createTextNode(u));
-
-    // Chip interactivo de ubicación de este usuario
-    const ubiInfo = obtenerIconoUbicacion(u);
-    const ubiPill = document.createElement('span');
-    ubiPill.className = `chip-univ-pill ${ubiInfo.pillClass}`;
-    ubiPill.textContent = `${ubiInfo.icon} ${ubiInfo.text}`;
-    ubiPill.title = `Ubicación actual de ${escapeHtml(u)}: ${ubiInfo.title}. Toca para cambiarla.`;
-    ubiPill.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      alternarUbicacionUsuario(u);
-    });
-    label.appendChild(ubiPill);
-
     listaFiltroCoincidencias.appendChild(label);
   });
-
-  renderizarBannerUbicacionUniversitarios();
 }
 
 if (btnSelTodos) {
@@ -1212,6 +653,35 @@ if (btnTopPersonas) {
   });
 }
 
+// Cambio de persona en el desplegable de edición
+if (selectPersonaAEditar) {
+  selectPersonaAEditar.addEventListener('change', () => {
+    actualizarEdicionPersonaDesplegable();
+  });
+}
+
+// Mostrar / ocultar PIN en el desplegable
+if (btnToggleEyeDesplegable) {
+  btnToggleEyeDesplegable.addEventListener('click', () => {
+    inputPinEditarDesplegable.type = inputPinEditarDesplegable.type === 'password' ? 'text' : 'password';
+  });
+}
+
+// Guardar nuevo PIN desde el desplegable
+if (btnGuardarPinDesplegable) {
+  btnGuardarPinDesplegable.addEventListener('click', async () => {
+    const nombre = selectPersonaAEditar.value;
+    const nuevoPin = inputPinEditarDesplegable.value.trim();
+    if (!nombre) return alert('Por favor, selecciona una persona.');
+    btnGuardarPinDesplegable.textContent = '...';
+    const ok = await actualizarPinUsuario(nombre, nuevoPin);
+    btnGuardarPinDesplegable.textContent = '💾 Guardar PIN';
+    if (ok) {
+      alert(`✅ ¡PIN de "${nombre}" actualizado correctamente! Nuevo PIN: ${nuevoPin}`);
+    }
+  });
+}
+
 // Eliminar persona seleccionada en el desplegable
 if (btnBorrarPersonaDesplegable) {
   btnBorrarPersonaDesplegable.addEventListener('click', async () => {
@@ -1224,15 +694,17 @@ if (btnBorrarPersonaDesplegable) {
 // Añadir nueva persona desde el desplegable
 if (btnCrearUsuarioDesplegable) {
   btnCrearUsuarioDesplegable.addEventListener('click', async () => {
-    const nombre = (nuevoNombreDesplegable?.value || '').trim();
-    const rol = nuevoRolDesplegable ? nuevoRolDesplegable.value : 'usuario';
+    const nombre = nuevoNombreDesplegable.value.trim();
+    const pin = nuevoPinDesplegable.value.trim();
+    const rol = nuevoRolDesplegable.value;
 
     btnCrearUsuarioDesplegable.textContent = '...';
-    const ok = await crearNuevoUsuario(nombre, rol);
+    const ok = await crearNuevoUsuario(nombre, pin, rol);
     btnCrearUsuarioDesplegable.textContent = '➕ Añadir';
     if (ok) {
-      if (nuevoNombreDesplegable) nuevoNombreDesplegable.value = '';
-      alert(`🎉 ¡"${nombre}" añadido con éxito al cuadrante!`);
+      nuevoNombreDesplegable.value = '';
+      nuevoPinDesplegable.value = '';
+      alert(`🎉 ¡"${nombre}" añadido con éxito! Ya puede entrar con el PIN: ${pin}`);
     }
   });
 }
@@ -1258,57 +730,100 @@ if (modalGestionUsuarios) {
 // Crear nueva persona en modal completo
 if (btnCrearUsuario) {
   btnCrearUsuario.addEventListener('click', async () => {
-    const nombre = (nuevoUserNombre?.value || '').trim();
-    const rol = nuevoUserRol ? nuevoUserRol.value : 'usuario';
+    const nombre = nuevoUserNombre.value.trim();
+    const pin = nuevoUserPin.value.trim();
+    const rol = nuevoUserRol.value;
 
     btnCrearUsuario.textContent = 'Añadiendo...';
-    const ok = await crearNuevoUsuario(nombre, rol);
+    const ok = await crearNuevoUsuario(nombre, pin, rol);
     btnCrearUsuario.textContent = 'Añadir';
     if (ok) {
-      if (nuevoUserNombre) nuevoUserNombre.value = '';
-      alert(`🎉 ¡"${nombre}" añadido con éxito!`);
+      nuevoUserNombre.value = '';
+      nuevoUserPin.value = '';
+      alert(`🎉 ¡"${nombre}" añadido con éxito! PIN asignado: ${pin}`);
+    }
+  });
+}
+
+// =========================================================================
+// --- MODAL RÁPIDO PARA CREAR/CAMBIAR PIN (LOGIN O APP) --------------------
+// =========================================================================
+if (linkCrearMiPin) {
+  linkCrearMiPin.addEventListener('click', (e) => {
+    e.preventDefault();
+    renderizarSelectoresUsuarios();
+    if (loginUsuario && loginUsuario.value && pinCrearNombreSel) {
+      pinCrearNombreSel.value = loginUsuario.value;
+      const perfil = listaPerfiles.find(p => p.nombre === loginUsuario.value);
+      if (perfil) pinCrearValor.value = perfil.pin || '';
+    } else {
+      pinCrearValor.value = '';
+    }
+    pinCrearNombre.value = '';
+    modalCrearPin.style.display = 'flex';
+    pinCrearValor.focus();
+  });
+}
+
+// Cuando se selecciona una persona existente en la modal rápida de PIN
+if (pinCrearNombreSel) {
+  pinCrearNombreSel.addEventListener('change', () => {
+    const sel = pinCrearNombreSel.value;
+    if (sel) {
+      pinCrearNombre.value = sel;
+      const perfil = listaPerfiles.find(p => p.nombre === sel);
+      if (perfil) pinCrearValor.value = perfil.pin || '';
+    } else {
+      pinCrearNombre.value = '';
+      pinCrearValor.value = '';
+    }
+  });
+}
+
+// Mostrar / ocultar PIN en la modal rápida
+if (btnToggleEyeCrearPin) {
+  btnToggleEyeCrearPin.addEventListener('click', () => {
+    pinCrearValor.type = pinCrearValor.type === 'password' ? 'text' : 'password';
+  });
+}
+
+[btnCerrarModalPin].forEach(btn => {
+  if (btn) btn.addEventListener('click', () => { modalCrearPin.style.display = 'none'; });
+});
+if (modalCrearPin) {
+  modalCrearPin.addEventListener('click', (e) => {
+    if (e.target === modalCrearPin) modalCrearPin.style.display = 'none';
+  });
+}
+
+// Guardar PIN desde modal rápida
+if (btnGuardarMiPin) {
+  btnGuardarMiPin.addEventListener('click', async () => {
+    let nombre = (pinCrearNombre.value || '').trim();
+    if (!nombre && pinCrearNombreSel && pinCrearNombreSel.value) {
+      nombre = pinCrearNombreSel.value;
+    }
+    const pin = (pinCrearValor.value || '').trim();
+
+    if (!nombre) return alert('Por favor, selecciona o indica tu nombre.');
+    if (pin.length !== 4 || isNaN(pin)) return alert('El PIN debe tener exactamente 4 dígitos numéricos.');
+
+    btnGuardarMiPin.textContent = 'Guardando...';
+    const ok = await actualizarPinUsuario(nombre, pin);
+    btnGuardarMiPin.textContent = '💾 Guardar PIN';
+
+    if (ok) {
+      modalCrearPin.style.display = 'none';
+      if (loginUsuario) loginUsuario.value = nombre;
+      if (inputPin) inputPin.value = pin;
+      alert(`✅ ¡PIN configurado para "${nombre}"! Ya puedes pulsar "Entrar con PIN".`);
     }
   });
 }
 
 // --- SISTEMA MULTI-GRUPO, SEGURIDAD PRIVADA Y ADMINISTRACIÓN DE MIEMBROS ---
 const GRUPOS_DEFECTO = [
-  {
-    id: 'amigos',
-    nombre: 'Amigos',
-    icono: '🍻',
-    creador: 'Cule',
-    miembros: ['Cule', 'Persona 2', 'Persona 3', 'Persona 4'],
-    codigo_acceso: 'AMIGOS-1234',
-    descripcion: 'Cuadrante con amigos'
-  },
-  {
-    id: 'familia',
-    nombre: 'Familia',
-    icono: '👨‍👩‍👧‍👦',
-    creador: 'Cule',
-    miembros: ['Cule', 'Persona 2'],
-    codigo_acceso: 'FAMILIA-1234',
-    descripcion: 'Planes familiares'
-  },
-  {
-    id: 'pareja',
-    nombre: 'Pareja',
-    icono: '💑',
-    creador: 'Cule',
-    miembros: ['Cule', 'Persona 3'],
-    codigo_acceso: 'PAREJA-1234',
-    descripcion: 'Turnos y planes en pareja'
-  },
-  {
-    id: 'hijos',
-    nombre: 'Hijos',
-    icono: '👶',
-    creador: 'Cule',
-    miembros: ['Cule', 'Persona 4'],
-    codigo_acceso: 'HIJOS-1234',
-    descripcion: 'Horarios de los peques y actividades'
-  }
+  { id: 'amigos', nombre: 'Amigos', icono: '👥', creador: 'Cule', miembros: ['Cule', 'Persona 2', 'Persona 3', 'Persona 4'], admins: ['Cule'] }
 ];
 
 let grupoActivo = localStorage.getItem('kedadas_grupo_activo') || 'Amigos';
@@ -1332,6 +847,7 @@ const btnCopiarCodigoGrupo = document.getElementById('btn-copiar-codigo-grupo');
 const btnAnadirUsuarioExistente = document.getElementById('btn-anadir-usuario-existente');
 const selectUsuarioExistenteGrupo = document.getElementById('select-usuario-existente-grupo');
 const inputNuevoNombreMiembro = document.getElementById('input-nuevo-nombre-miembro');
+const inputNuevoPinMiembro = document.getElementById('input-nuevo-pin-miembro');
 const btnCrearYAnadirMiembro = document.getElementById('btn-crear-y-anadir-miembro');
 const inputCodigoUnirse = document.getElementById('input-codigo-unirse');
 const btnUnirseConCodigo = document.getElementById('btn-unirse-con-codigo');
@@ -1348,47 +864,33 @@ const btnCancelarCambiosHorario = document.getElementById('btn-cancelar-cambios-
 const btnGuardarCambiosHorario = document.getElementById('btn-guardar-cambios-horario');
 const btnGuardarHorarioTop = document.getElementById('btn-guardar-horario-top');
 
-function obtenerNombreGrupo(g) {
-  if (!g) return '';
-  if (typeof g === 'string') return g.trim();
-  return (g.nombre || g.name || 'Grupo').trim();
-}
-
 function normalizarGrupo(g) {
-  if (!g) return null;
-  const nombre = (g.nombre || g.name || 'Grupo').trim();
   let miembros = [];
   if (Array.isArray(g.miembros)) {
-    miembros = g.miembros.map(m => (typeof m === 'string' ? m : (m?.nombre || m?.name || ''))).filter(Boolean);
+    miembros = g.miembros;
   } else if (typeof g.miembros === 'string') {
     try {
-      const parsed = JSON.parse(g.miembros);
-      if (Array.isArray(parsed)) {
-        miembros = parsed.map(m => (typeof m === 'string' ? m : (m?.nombre || m?.name || ''))).filter(Boolean);
-      }
+      miembros = JSON.parse(g.miembros);
     } catch (e) {
       miembros = [];
     }
   }
   if (!Array.isArray(miembros) || miembros.length === 0) {
-    const def = GRUPOS_DEFECTO.find(d => (d.id || '').toLowerCase() === (g.id || '').toLowerCase() || obtenerNombreGrupo(d).toLowerCase() === nombre.toLowerCase());
-    if (def && Array.isArray(def.miembros) && def.miembros.length > 0) {
-      miembros = [...def.miembros];
-    } else {
-      miembros = [g.creador || usuarioLogueado || 'Cule'];
-    }
+    const def = GRUPOS_DEFECTO.find(d => d.id === g.id || d.nombre.toLowerCase() === (g.nombre || '').toLowerCase());
+    if (def) miembros = [...def.miembros];
+    else miembros = [g.creador || usuarioLogueado || ''].filter(Boolean);
   }
-  const creador = g.creador || (['Amigos', 'Familia', 'Pareja', 'Hijos'].includes(nombre) ? 'Cule' : (usuarioLogueado || 'Cule'));
-  const codigo = g.codigo_acceso || generarCodigoAcceso(nombre);
+  const creador = g.creador || usuarioLogueado || '';
+  const codigo = g.codigo_acceso || '';
   return {
-    id: g.id || nombre.toLowerCase().replace(/\s+/g, '-'),
-    nombre: nombre,
-    name: nombre,
+    id: g.id || g.nombre.toLowerCase().replace(/\s+/g, '-'),
+    nombre: g.nombre,
     icono: g.icono || '👥',
     creador: creador,
     miembros: miembros,
     codigo_acceso: codigo,
-    descripcion: g.descripcion || g.description || ''
+    descripcion: g.descripcion || '',
+    admins: Array.isArray(g.admins) ? g.admins : []
   };
 }
 
@@ -1399,189 +901,164 @@ function generarCodigoAcceso(nombre) {
 }
 
 function puedeUsuarioVerGrupo(g, usuario) {
-  return true;
+  if (!usuario) return true;
+  if (esAdmin) return true;
+  const gNorm = normalizarGrupo(g);
+  if (gNorm.creador && gNorm.creador.toLowerCase() === usuario.toLowerCase()) return true;
+  if (Array.isArray(gNorm.miembros) && gNorm.miembros.some(m => m.toLowerCase() === usuario.toLowerCase())) return true;
+  return false;
 }
 
 function obtenerGruposVisibles(usuario) {
-  return (listaGrupos || []).map(g => normalizarGrupo(g)).filter(Boolean);
+  return listaGrupos.filter(g => puedeUsuarioVerGrupo(g, usuario));
 }
 
 function esAdminDelGrupo(g, usuario) {
   if (!g) return false;
-  if (esAdmin || (usuario && usuario.toLowerCase() === 'cule')) return true;
+  if (esAdmin) return true;
   const gNorm = normalizarGrupo(g);
-  if (!gNorm) return false;
   if (gNorm.creador && usuario && gNorm.creador.toLowerCase() === usuario.toLowerCase()) return true;
+  if (usuario && gNorm.admins.some(a => a.toLowerCase() === usuario.toLowerCase())) return true;
   return false;
 }
 
 function obtenerMiembrosGrupo(grupoNombre) {
-  const nombreTarget = (grupoNombre || grupoActivo || '').trim().toLowerCase();
-  const g = (listaGrupos || []).find(item => obtenerNombreGrupo(item).toLowerCase() === nombreTarget);
-  if (g) {
-    const norm = normalizarGrupo(g);
-    if (norm && Array.isArray(norm.miembros) && norm.miembros.length > 0) {
-      return norm.miembros;
-    }
-  }
-  const def = GRUPOS_DEFECTO.find(d => (d.id || '').toLowerCase() === nombreTarget || obtenerNombreGrupo(d).toLowerCase() === nombreTarget);
-  if (def && Array.isArray(def.miembros) && def.miembros.length > 0) {
-    return [...def.miembros];
-  }
-  return (Array.isArray(usuarios) && usuarios.length > 0) ? [...usuarios] : ['Cule'];
+  const g = listaGrupos.find(item => item.nombre.toLowerCase() === (grupoNombre || grupoActivo).toLowerCase());
+  if (!g) return [usuarioLogueado].filter(Boolean);
+  const norm = normalizarGrupo(g);
+  return norm.miembros;
 }
 
 function actualizarBannerGrupo() {
-  const grupoObj = (listaGrupos || []).find(g => obtenerNombreGrupo(g).toLowerCase() === (grupoActivo || '').toLowerCase());
-  const icono = grupoObj?.icono || '👥';
-  const texto = `${icono} ${grupoActivo}`;
+  const grupoObj = listaGrupos.find(g => g.nombre.toLowerCase() === grupoActivo.toLowerCase());
+  const texto = `${grupoObj?.icono || '👥'} ${grupoActivo}`;
   if (nombreGrupoBanner) nombreGrupoBanner.textContent = texto;
   const nombreGrupoBannerTab = document.getElementById('nombre-grupo-banner-tab');
   if (nombreGrupoBannerTab) nombreGrupoBannerTab.textContent = texto;
   const chatTituloGrupo = document.getElementById('chat-titulo-grupo');
+  if (chatTituloGrupo) chatTituloGrupo.textContent = `💬 Tablón de Avisos — ${grupoActivo}`;
 }
 
-async function sincronizarGrupoEnSupabase(grupo) {
+const esUuid = (v) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v || '');
+
+async function obtenerMiUserId() {
+  const { data: { session } } = await supabaseApp.auth.getSession();
+  return session?.user?.id || null;
+}
+
+function grupoActivoId() {
+  const g = listaGrupos.find(item => item.nombre.toLowerCase() === (grupoActivo || '').toLowerCase());
+  return g && esUuid(g.id) ? g.id : null;
+}
+
+// Crea el grupo en el servidor (el creador pasa a ser administrador por un trigger)
+async function crearGrupoEnServidor(nombre, icono, descripcion) {
+  const uid = await obtenerMiUserId();
+  if (!uid) { alert('Tu sesión ha caducado. Vuelve a iniciar sesión.'); return null; }
+  const { data, error } = await supabaseApp.from('groups')
+    .insert({ name: nombre, icono, description: descripcion || '', created_by: uid }).select().single();
+  if (error) { alert('No se pudo crear el grupo: ' + error.message); return null; }
+  return normalizarGrupo({ id: data.id, nombre: data.name, icono: data.icono, descripcion: data.description,
+    creador: usuarioLogueado, miembros: [usuarioLogueado], admins: [usuarioLogueado] });
+}
+
+async function generarInvitacionGrupo(grupoId) {
   try {
-    const payload = {
-      id: grupo.id,
-      nombre: grupo.nombre,
-      icono: grupo.icono || '👥',
-      creador: grupo.creador || 'Cule',
-      miembros: JSON.stringify(grupo.miembros || []),
-      codigo_acceso: grupo.codigo_acceso || generarCodigoAcceso(grupo.nombre),
-      descripcion: grupo.descripcion || ''
-    };
-    await supabaseApp.from('grupos').upsert(payload, { onConflict: 'id' });
+    const { data, error } = await supabaseApp.rpc('create_group_invitation', { p_group_id: grupoId });
+    if (error) throw error;
+    return data?.code || '';
+  } catch (e) {
+    console.warn('No se pudo generar código de invitación:', e);
+    return '';
+  }
+}
+
+// Mantiene sincronizados nombre/icono y miembros del grupo (el servidor decide qué se permite según tu rol)
+async function sincronizarGrupoEnSupabase(grupo) {
+  if (!grupo || !esUuid(grupo.id)) return;
+  try {
+    await supabaseApp.from('groups')
+      .update({ name: grupo.nombre, icono: grupo.icono || '👥', description: grupo.descripcion || '', updated_at: new Date().toISOString() })
+      .eq('id', grupo.id);
+
+    const { data: actuales } = await supabaseApp.from('group_members').select('user_id,role').eq('group_id', grupo.id);
+    const deseados = new Set();
+    (grupo.miembros || []).forEach(n => {
+      const p = listaPerfiles.find(x => x.user_id && (x.nombre || '').toLowerCase() === (n || '').toLowerCase());
+      if (p) deseados.add(p.user_id);
+    });
+    const existentes = new Set((actuales || []).map(m => m.user_id));
+    const altas = [...deseados].filter(id => !existentes.has(id)).map(user_id => ({ group_id: grupo.id, user_id, role: 'member' }));
+    const bajas = (actuales || []).filter(m => !deseados.has(m.user_id) && m.role !== 'admin').map(m => m.user_id);
+
+    if (altas.length) await supabaseApp.from('group_members').insert(altas);
+    if (bajas.length) await supabaseApp.from('group_members').delete().eq('group_id', grupo.id).in('user_id', bajas);
   } catch (err) {
     console.warn('Aviso sincronizando grupo en Supabase:', err);
   }
 }
 
 async function cargarGruposDesdeBD() {
-  let gruposCargados = false;
-
-  // 1. Intentar cargar desde tabla 'groups' y 'group_members' (schema Supabase Auth)
   try {
-    const { data: groupsData, error: groupsErr } = await supabaseApp
-      .from('groups')
-      .select('*')
-      .order('created_at', { ascending: true });
+    const [rg, rm] = await Promise.all([
+      supabaseApp.from('groups').select('id,name,icono,description,created_by,created_at').order('created_at', { ascending: true }),
+      supabaseApp.from('group_members').select('group_id,user_id,role')
+    ]);
+    if (rg.error) throw rg.error;
+    if (rm.error) throw rm.error;
 
-    if (!groupsErr && Array.isArray(groupsData) && groupsData.length > 0) {
-      const { data: membersData } = await supabaseApp
-        .from('group_members')
-        .select('group_id, user_id, role');
-
-      const { data: perfilesData } = await supabaseApp
-        .from('perfiles')
-        .select('user_id, nombre');
-
-      const userMap = new Map();
-      if (Array.isArray(perfilesData)) {
-        perfilesData.forEach(p => {
-          if (p.user_id && p.nombre) userMap.set(p.user_id, p.nombre);
-        });
-      }
-
-      const miembrosPorGrupo = new Map();
-      if (Array.isArray(membersData)) {
-        membersData.forEach(m => {
-          const nombreUser = userMap.get(m.user_id);
-          if (nombreUser) {
-            if (!miembrosPorGrupo.has(m.group_id)) miembrosPorGrupo.set(m.group_id, []);
-            miembrosPorGrupo.get(m.group_id).push(nombreUser);
-          }
-        });
-      }
-
-      listaGrupos = groupsData.map(g => {
-        let miembrosG = miembrosPorGrupo.get(g.id) || [];
-        const creadorNombre = userMap.get(g.created_by) || (usuarioLogueado || 'Cule');
-        if (miembrosG.length === 0) miembrosG = [creadorNombre];
-        else if (!miembrosG.includes(creadorNombre)) miembrosG.unshift(creadorNombre);
-
-        return normalizarGrupo({
-          id: g.id,
-          nombre: g.name || g.nombre,
-          icono: g.icono || '👥',
-          creador: creadorNombre,
-          miembros: miembrosG,
-          codigo_acceso: g.codigo_acceso || generarCodigoAcceso(g.name || g.nombre),
-          descripcion: g.description || ''
-        });
+    const nombrePorId = (uid) => listaPerfiles.find(p => p.user_id === uid)?.nombre;
+    const miId = await obtenerMiUserId();
+    listaGrupos = [];
+    for (const g of (rg.data || [])) {
+      const miembrosFila = (rm.data || []).filter(m => m.group_id === g.id);
+      const obj = normalizarGrupo({
+        id: g.id, nombre: g.name, icono: g.icono, descripcion: g.description,
+        creador: nombrePorId(g.created_by) || '',
+        miembros: miembrosFila.map(m => nombrePorId(m.user_id)).filter(Boolean),
+        admins: miembrosFila.filter(m => m.role === 'admin').map(m => nombrePorId(m.user_id)).filter(Boolean)
       });
-      gruposCargados = true;
-    }
-  } catch (errGroups) {
-    console.warn('Aviso cargando groups desde Supabase:', errGroups);
-  }
-
-  // 2. Si no se cargaron desde 'groups', intentar desde 'grupos' (retrocompatibilidad)
-  if (!gruposCargados) {
-    try {
-      const { data, error } = await supabaseApp.from('grupos').select('*').order('created_at', { ascending: true });
-      if (!error && Array.isArray(data) && data.length > 0) {
-        listaGrupos = data.map(g => normalizarGrupo(g));
-        gruposCargados = true;
+      // Código de invitación visible solo para administradores
+      const soyAdmin = miembrosFila.some(m => m.user_id === miId && m.role === 'admin');
+      if (soyAdmin) {
+        const { data: inv } = await supabaseApp.from('group_invitations').select('code')
+          .eq('group_id', g.id).eq('is_active', true).order('created_at', { ascending: false }).limit(1);
+        obj.codigo_acceso = inv?.[0]?.code || await generarInvitacionGrupo(g.id);
       }
-    } catch (e) {}
-  }
-
-  // 3. Fallback a almacenamiento local o valores por defecto
-  if (!gruposCargados) {
-    let guardados = null;
-    try {
-      guardados = JSON.parse(localStorage.getItem('kedadas_lista_grupos'));
-    } catch(e) {}
-    if (Array.isArray(guardados) && guardados.length > 0) {
-      listaGrupos = guardados.map(g => normalizarGrupo(g)).filter(Boolean);
-    } else {
-      listaGrupos = [...GRUPOS_DEFECTO].map(g => normalizarGrupo(g)).filter(Boolean);
+      listaGrupos.push(obj);
     }
+    localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos));
+  } catch (e) {
+    console.warn('No se pudieron cargar los grupos del servidor, usando copia local:', e);
+    try {
+      const guardados = JSON.parse(localStorage.getItem('kedadas_lista_grupos'));
+      listaGrupos = Array.isArray(guardados) ? guardados.map(g => normalizarGrupo(g)) : [];
+    } catch (e2) { listaGrupos = []; }
   }
 
-  localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos));
   renderizarSelectorGrupos();
   renderizarPanelGestionGrupoActivo();
   actualizarBannerGrupo();
-  renderizarSelectoresUsuarios();
-  renderizarFiltroCoincidencias(true);
 }
 
 function renderizarSelectorGrupos() {
   const visibles = obtenerGruposVisibles(usuarioLogueado);
 
-  const nombreActivo = (grupoActivo || '').toLowerCase();
-  if (visibles.length > 0 && !visibles.some(g => obtenerNombreGrupo(g).toLowerCase() === nombreActivo)) {
-    grupoActivo = obtenerNombreGrupo(visibles[0]);
-    try { localStorage.setItem('kedadas_grupo_activo', grupoActivo); } catch(e) {}
+  // Si el grupo activo no es accesible para el usuario conectado, conmutar al primero que sí lo sea
+  if (visibles.length > 0 && !visibles.some(g => g.nombre.toLowerCase() === grupoActivo.toLowerCase())) {
+    grupoActivo = visibles[0].nombre;
+    localStorage.setItem('kedadas_grupo_activo', grupoActivo);
   }
 
-  // Actualizar selector dropdown en la pestaña de grupos
+  // Actualizar selector dropdown
   if (selectorGrupoActivo) {
     selectorGrupoActivo.innerHTML = '';
     visibles.forEach(g => {
       const opt = document.createElement('option');
-      const n = obtenerNombreGrupo(g);
-      opt.value = n;
-      opt.textContent = `${g.icono || '👥'} ${n}`;
-      if (n.toLowerCase() === (grupoActivo || '').toLowerCase()) opt.selected = true;
+      opt.value = g.nombre;
+      opt.textContent = `${g.icono || '👥'} ${g.nombre}`;
+      if (g.nombre.toLowerCase() === grupoActivo.toLowerCase()) opt.selected = true;
       selectorGrupoActivo.appendChild(opt);
-    });
-  }
-
-  // Actualizar selector dropdown en el Cuadrante
-  const cuadranteSelectorGrupo = document.getElementById('cuadrante-selector-grupo');
-  if (cuadranteSelectorGrupo) {
-    cuadranteSelectorGrupo.innerHTML = '';
-    visibles.forEach(g => {
-      const opt = document.createElement('option');
-      const n = obtenerNombreGrupo(g);
-      opt.value = n;
-      opt.textContent = `${g.icono || '👥'} ${n}`;
-      if (n.toLowerCase() === (grupoActivo || '').toLowerCase()) opt.selected = true;
-      cuadranteSelectorGrupo.appendChild(opt);
     });
   }
 
@@ -1599,15 +1076,14 @@ function renderizarSelectorGrupos() {
       contenedorTarjetas.innerHTML = '<p class="modal-desc-sub" style="grid-column: 1/-1;">No tienes ningún grupo asignado todavía. Introduce un código de invitación o crea tu propio grupo privado abajo.</p>';
     } else {
       visibles.forEach(g => {
-        const n = obtenerNombreGrupo(g);
-        const esActivo = n.toLowerCase() === (grupoActivo || '').toLowerCase();
+        const esActivo = g.nombre.toLowerCase() === grupoActivo.toLowerCase();
         const esAdminG = esAdminDelGrupo(g, usuarioLogueado);
-        const numMiembros = (Array.isArray(g.miembros) ? g.miembros : []).length;
+        const numMiembros = (g.miembros || []).length;
         const card = document.createElement('div');
         card.className = `card-grupo-item ${esActivo ? 'activa' : ''}`;
         card.innerHTML = `
-          <span class="card-grupo-icono">${escapeHtml(g.icono || '👥')}</span>
-          <span class="card-grupo-nombre">${escapeHtml(n)}</span>
+          <span class="card-grupo-icono">${escapeHTML(g.icono || '👥')}</span>
+          <span class="card-grupo-nombre">${escapeHTML(g.nombre)}</span>
           <div class="card-grupo-meta-row">
             <span class="badge-miembros-card">👥 ${numMiembros}</span>
             ${esAdminG ? '<span class="badge-admin-card">👑 Admin</span>' : ''}
@@ -1616,7 +1092,7 @@ function renderizarSelectorGrupos() {
         `;
         card.addEventListener('click', () => {
           if (!esActivo) {
-            cambiarGrupo(n);
+            cambiarGrupo(g.nombre);
           }
         });
         contenedorTarjetas.appendChild(card);
@@ -1628,7 +1104,7 @@ function renderizarSelectorGrupos() {
 }
 
 function renderizarPanelGestionGrupoActivo() {
-  const grupo = (listaGrupos || []).find(g => obtenerNombreGrupo(g).toLowerCase() === (grupoActivo || '').toLowerCase());
+  const grupo = listaGrupos.find(g => g.nombre.toLowerCase() === grupoActivo.toLowerCase());
   if (!grupo) return;
   const gNorm = normalizarGrupo(grupo);
 
@@ -1662,27 +1138,20 @@ function renderizarPanelGestionGrupoActivo() {
   const contenedorMiembros = document.getElementById('lista-miembros-grupo-contenedor');
   if (contenedorMiembros) {
     contenedorMiembros.innerHTML = '';
-    (gNorm.miembros || []).forEach(m => {
-      const mStr = String(m || '').trim();
-      if (!mStr) return;
-      const esCreador = mStr.toLowerCase() === (gNorm.creador || '').toLowerCase();
-      const esYo = usuarioLogueado && mStr.toLowerCase() === usuarioLogueado.toLowerCase();
-      const inicial = mStr.charAt(0).toUpperCase();
+    gNorm.miembros.forEach(m => {
+      const esCreador = m.toLowerCase() === gNorm.creador.toLowerCase();
+      const esYo = usuarioLogueado && m.toLowerCase() === usuarioLogueado.toLowerCase();
+      const inicial = m.charAt(0).toUpperCase();
 
-      const ubi = obtenerIconoUbicacion(mStr);
       const item = document.createElement('div');
       item.className = 'miembro-card-item';
       item.innerHTML = `
         <div class="miembro-info-wrap">
-          <div class="miembro-avatar-icon" style="position: relative;">
-            ${escapeHtml(inicial)}
-            <span class="avatar-location-badge" title="${escapeHtml(ubi.title)}">${ubi.icon}</span>
-          </div>
+          <div class="miembro-avatar-icon">${escapeHTML(inicial)}</div>
           <div>
-            <div class="miembro-nombre-txt">${escapeHtml(mStr)} ${esYo ? '<small style="color:#6366f1; font-weight:800;">(Tú)</small>' : ''}</div>
+            <div class="miembro-nombre-txt">${escapeHTML(m)} ${esYo ? '<small style="color:#6366f1; font-weight:800;">(Tú)</small>' : ''}</div>
             <div class="miembro-tags-row">
               <span class="${esCreador ? 'badge-rol-admin' : 'badge-rol-miembro'}">${esCreador ? '👑 Creador / Admin' : '👤 Miembro'}</span>
-              <span class="badge-ubi-pill ${ubi.pillClass}">${ubi.icon} ${escapeHtml(ubi.text)}</span>
             </div>
           </div>
         </div>
@@ -1690,24 +1159,25 @@ function renderizarPanelGestionGrupoActivo() {
       `;
 
       const accionesWrap = item.querySelector('.miembro-acciones-btns');
-      if (accionesWrap) {
-        if (esAdminG && !esCreador) {
-          const btnQuitar = document.createElement('button');
-          btnQuitar.type = 'button';
-          btnQuitar.className = 'btn-quitar-miembro-mini';
-          btnQuitar.textContent = '❌ Quitar';
-          btnQuitar.title = `Quitar a ${mStr} de ${gNorm.nombre}`;
-          btnQuitar.addEventListener('click', () => quitarMiembroDeGrupo(gNorm.id, mStr));
-          accionesWrap.appendChild(btnQuitar);
-        } else if (!esCreador && esYo) {
-          const btnSalir = document.createElement('button');
-          btnSalir.type = 'button';
-          btnSalir.className = 'btn-salir-grupo-mini';
-          btnSalir.textContent = '🚪 Salir';
-          btnSalir.title = `Abandonar el grupo ${gNorm.nombre}`;
-          btnSalir.addEventListener('click', () => abandonarGrupo(gNorm.id));
-          accionesWrap.appendChild(btnSalir);
-        }
+
+      // Si soy admin del grupo y este miembro no es el creador, puedo quitarlo
+      if (esAdminG && !esCreador) {
+        const btnQuitar = document.createElement('button');
+        btnQuitar.type = 'button';
+        btnQuitar.className = 'btn-quitar-miembro-mini';
+        btnQuitar.textContent = '❌ Quitar';
+        btnQuitar.title = `Quitar a ${m} de ${gNorm.nombre}`;
+        btnQuitar.addEventListener('click', () => quitarMiembroDeGrupo(gNorm.id, m));
+        accionesWrap.appendChild(btnQuitar);
+      } else if (!esCreador && esYo) {
+        // Si no soy admin y soy yo, puedo abandonar el grupo
+        const btnSalir = document.createElement('button');
+        btnSalir.type = 'button';
+        btnSalir.className = 'btn-salir-grupo-mini';
+        btnSalir.textContent = '🚪 Salir';
+        btnSalir.title = `Abandonar el grupo ${gNorm.nombre}`;
+        btnSalir.addEventListener('click', () => abandonarGrupo(gNorm.id));
+        accionesWrap.appendChild(btnSalir);
       }
 
       contenedorMiembros.appendChild(item);
@@ -1726,10 +1196,10 @@ function renderizarPanelGestionGrupoActivo() {
     if (btnEditarGrupo) btnEditarGrupo.style.display = 'inline-flex';
     if (btnEliminarGrupo) btnEliminarGrupo.style.display = 'inline-flex';
 
+    // Poblar selector de personas existentes que aún no están en este grupo
     if (selectUsuarioExistenteGrupo) {
       selectUsuarioExistenteGrupo.innerHTML = '<option value="">-- Selecciona una persona --</option>';
-      const miembrosLower = (gNorm.miembros || []).map(m => String(m).toLowerCase());
-      (usuarios || []).filter(u => u && !miembrosLower.includes(String(u).toLowerCase())).forEach(u => {
+      usuarios.filter(u => !gNorm.miembros.some(m => m.toLowerCase() === u.toLowerCase())).forEach(u => {
         const opt = document.createElement('option');
         opt.value = u;
         opt.textContent = `👤 ${u}`;
@@ -1749,73 +1219,56 @@ function renderizarPanelGestionGrupoActivo() {
 }
 
 function cambiarGrupo(nuevoGrupo) {
-  if (!nuevoGrupo) return;
-  const nombreLimpio = (typeof nuevoGrupo === 'string' ? nuevoGrupo : (nuevoGrupo.nombre || nuevoGrupo.name || '')).trim();
-  if (!nombreLimpio) return;
+  const g = listaGrupos.find(item => item.nombre.toLowerCase() === nuevoGrupo.toLowerCase());
+  if (g && !puedeUsuarioVerGrupo(g, usuarioLogueado)) {
+    return alert(`🔒 Grupo Privado: No tienes acceso al grupo "${nuevoGrupo}". Pide al administrador (${g.creador || 'el creador'}) que te añada o introduce su código de invitación.`);
+  }
 
-  const g = (listaGrupos || []).find(item => obtenerNombreGrupo(item).toLowerCase() === nombreLimpio.toLowerCase());
-
-  try {
-    if (Object.keys(cambiosHorarioPendientes).length > 0) {
-      const guardar = confirm(`Tienes modificaciones sin guardar en el cuadrante de "${grupoActivo}". ¿Deseas guardarlas antes de cambiar a "${nombreLimpio}"?`);
-      if (guardar) {
-        guardarCambiosHorarioConfirmado();
-      } else {
-        cambiosHorarioPendientes = {};
-        actualizarBarraCambiosPendientes();
-      }
+  if (Object.keys(cambiosHorarioPendientes).length > 0) {
+    const guardar = confirm(`Tienes modificaciones sin guardar en el cuadrante de "${grupoActivo}". ¿Deseas guardarlas antes de cambiar a "${nuevoGrupo}"?`);
+    if (guardar) {
+      guardarCambiosHorarioConfirmado();
+    } else {
+      cambiosHorarioPendientes = {};
+      actualizarBarraCambiosPendientes();
     }
-  } catch(e) {}
+  }
 
-  grupoActivo = g ? obtenerNombreGrupo(g) : nombreLimpio;
-  try {
-    localStorage.setItem('kedadas_grupo_activo', grupoActivo);
-  } catch(e) {}
+  grupoActivo = nuevoGrupo;
+  localStorage.setItem('kedadas_grupo_activo', grupoActivo);
 
-  // Sincronizar miembros del nuevo grupo
+  // Asegurar que miUsuario pertenece a los miembros del nuevo grupo
   const miembrosNuevo = obtenerMiembrosGrupo(grupoActivo);
-  if (usuarioLogueado && !miembrosNuevo.some(m => String(m || '').toLowerCase() === usuarioLogueado.toLowerCase())) {
-    miembrosNuevo.push(usuarioLogueado);
-    if (g && Array.isArray(g.miembros)) {
-      g.miembros.push(usuarioLogueado);
-      sincronizarGrupoEnSupabase(g);
+  if (!miembrosNuevo.includes(miUsuario)) {
+    if (miembrosNuevo.includes(usuarioLogueado)) {
+      miUsuario = usuarioLogueado;
+    } else if (miembrosNuevo.length > 0) {
+      miUsuario = miembrosNuevo[0];
     }
   }
 
-  if (miembrosNuevo.includes(usuarioLogueado)) {
-    miUsuario = usuarioLogueado;
-  } else if (miembrosNuevo.length > 0) {
-    miUsuario = miembrosNuevo[0];
-  }
-
-  usuariosSeleccionadosCoincidencias = new Set(miembrosNuevo);
-  ultimoGrupoFiltroCoincidencias = grupoActivo;
-
-  try { renderizarSelectorGrupos(); } catch(e) { console.warn(e); }
-  try { renderizarPanelGestionGrupoActivo(); } catch(e) { console.warn(e); }
-  try { actualizarBannerGrupo(); } catch(e) { console.warn(e); }
-  try { renderizarSelectoresUsuarios(); } catch(e) { console.warn(e); }
-  try { renderizarFiltroCoincidencias(true); } catch(e) { console.warn(e); }
+  renderizarSelectorGrupos();
+  renderizarPanelGestionGrupoActivo();
+  actualizarBannerGrupo();
+  renderizarSelectoresUsuarios();
+  renderizarFiltroCoincidencias();
 
   if (resultadoCoincidencias) {
     resultadoCoincidencias.innerHTML = '';
     resultadoCoincidencias.classList.remove('visible');
   }
 
-  try { iniciarCalendario(); } catch(e) { console.warn(e); }
-  try { cargarChatInicial(); } catch(e) { console.warn(e); }
-  setTimeout(() => {
-    try { cargarVotaciones(); } catch(e) {}
-  }, 200);
+  iniciarCalendario();
+  cargarChatInicial();
+  setTimeout(cargarVotaciones, 200);
 }
 
 // Añadir usuario ya registrado al grupo activo
 async function anadirUsuarioExistenteAGrupoActivo() {
-  const grupo = (listaGrupos || []).find(g => obtenerNombreGrupo(g).toLowerCase() === (grupoActivo || '').toLowerCase());
+  const grupo = listaGrupos.find(g => g.nombre.toLowerCase() === grupoActivo.toLowerCase());
   if (!grupo) return;
-  const gNorm = normalizarGrupo(grupo);
   if (!esAdminDelGrupo(grupo, usuarioLogueado)) {
-    return alert(`🔒 Solo el administrador (${gNorm.creador}) puede añadir miembros a "${gNorm.nombre}".`);
+    return alert(`🔒 Solo el administrador (${grupo.creador}) puede añadir miembros a "${grupo.nombre}".`);
   }
 
   const usuarioSeleccionado = selectUsuarioExistenteGrupo ? selectUsuarioExistenteGrupo.value : '';
@@ -1824,12 +1277,12 @@ async function anadirUsuarioExistenteAGrupoActivo() {
   }
 
   if (!Array.isArray(grupo.miembros)) grupo.miembros = [];
-  if (grupo.miembros.some(m => String(m).toLowerCase() === usuarioSeleccionado.toLowerCase())) {
+  if (grupo.miembros.some(m => m.toLowerCase() === usuarioSeleccionado.toLowerCase())) {
     return alert(`"${usuarioSeleccionado}" ya pertenece a este grupo.`);
   }
 
   grupo.miembros.push(usuarioSeleccionado);
-  try { localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos)); } catch(e) {}
+  localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos));
   await sincronizarGrupoEnSupabase(grupo);
 
   renderizarSelectorGrupos();
@@ -1838,100 +1291,55 @@ async function anadirUsuarioExistenteAGrupoActivo() {
   renderizarFiltroCoincidencias();
 
   if (typeof confetti === 'function') confetti({ particleCount: 30, spread: 60 });
-  alert(`✅ ¡"${usuarioSeleccionado}" ha sido añadido al grupo "${gNorm.nombre}"!`);
+  alert(`✅ ¡"${usuarioSeleccionado}" ha sido añadido al grupo "${grupo.nombre}"!`);
 }
 
 // Crear nueva persona e incluirla directamente en el grupo activo
 async function crearYAnadirNuevoMiembroAGrupoActivo() {
-  const grupo = (listaGrupos || []).find(g => obtenerNombreGrupo(g).toLowerCase() === (grupoActivo || '').toLowerCase());
-  if (!grupo) return;
-  const gNorm = normalizarGrupo(grupo);
-  if (!esAdminDelGrupo(grupo, usuarioLogueado)) {
-    return alert(`🔒 Solo el administrador (${gNorm.creador}) puede añadir miembros a "${gNorm.nombre}".`);
-  }
-
-  const nombre = (inputNuevoNombreMiembro?.value || '').trim();
-
-  if (!nombre) return alert('Por favor, escribe el nombre de la persona a invitar.');
-
-  if (!Array.isArray(grupo.miembros)) grupo.miembros = [];
-  if (grupo.miembros.some(m => String(m).toLowerCase() === nombre.toLowerCase())) {
-    return alert(`"${nombre}" ya pertenece a este grupo.`);
-  }
-
-  const inputPin = document.getElementById('input-nuevo-pin-miembro');
-  const passwordNueva = (inputPin?.value || '').trim() || '1234';
-
-  // Si la persona no existe en la app, la creamos en listaPerfiles y Supabase
-  if (!usuarios.some(u => String(u).toLowerCase() === nombre.toLowerCase())) {
-    listaPerfiles.push({ id: nombre, nombre, rol: 'usuario', ciudad_origen: 'Plasencia', password: passwordNueva });
-    guardarPerfilesLocales();
-    try {
-      localStorage.setItem(`kedadas_pass_${nombre.toLowerCase()}`, passwordNueva);
-      await supabaseApp.from('perfiles').insert({ nombre, rol: 'usuario', ciudad_origen: 'Plasencia', password: passwordNueva });
-    } catch (e) {}
-  }
-
-  grupo.miembros.push(nombre);
-  try { localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos)); } catch(e) {}
-  await sincronizarGrupoEnSupabase(grupo);
-
-  if (inputNuevoNombreMiembro) inputNuevoNombreMiembro.value = '';
-  if (inputPin) inputPin.value = '';
-
-  renderizarSelectorGrupos();
-  renderizarPanelGestionGrupoActivo();
-  renderizarSelectoresUsuarios();
-  renderizarFiltroCoincidencias();
-
-  if (typeof confetti === 'function') confetti({ particleCount: 40, spread: 70 });
-  alert(`🎉 ¡"${nombre}" ha sido dado de alta y añadido al grupo "${gNorm.nombre}"!`);
+  return alert('Para añadir a alguien que aún no usa la app, compártele el código de invitación del grupo: se registrará con su propio correo.');
 }
-
 // Quitar miembro de un grupo
 async function quitarMiembroDeGrupo(grupoId, miembro) {
-  const grupo = (listaGrupos || []).find(g => g && g.id === grupoId);
+  const grupo = listaGrupos.find(g => g.id === grupoId);
   if (!grupo) return;
-  const gNorm = normalizarGrupo(grupo);
 
   if (!esAdminDelGrupo(grupo, usuarioLogueado)) {
-    return alert(`🔒 Solo el administrador (${gNorm.creador}) puede expulsar o quitar miembros.`);
+    return alert(`🔒 Solo el administrador (${grupo.creador}) puede expulsar o quitar miembros.`);
   }
-  if (String(miembro).toLowerCase() === (gNorm.creador || '').toLowerCase()) {
-    return alert(`No puedes quitar al creador y administrador (${gNorm.creador}) del grupo.`);
+  if (miembro.toLowerCase() === grupo.creador.toLowerCase()) {
+    return alert(`No puedes quitar al creador y administrador (${grupo.creador}) del grupo.`);
   }
 
-  const confirmar = confirm(`¿Estás seguro de que deseas quitar a "${miembro}" del grupo "${gNorm.nombre}"?\nEsta persona ya no podrá ver los turnos ni el chat de este grupo.`);
+  const confirmar = confirm(`¿Estás seguro de que deseas quitar a "${miembro}" del grupo "${grupo.nombre}"?\nEsta persona ya no podrá ver los turnos ni el chat de este grupo.`);
   if (!confirmar) return;
 
-  grupo.miembros = (grupo.miembros || []).filter(m => String(m).toLowerCase() !== String(miembro).toLowerCase());
-  try { localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos)); } catch(e) {}
+  grupo.miembros = (grupo.miembros || []).filter(m => m.toLowerCase() !== miembro.toLowerCase());
+  localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos));
   await sincronizarGrupoEnSupabase(grupo);
 
   renderizarSelectorGrupos();
   renderizarPanelGestionGrupoActivo();
   renderizarSelectoresUsuarios();
   renderizarFiltroCoincidencias();
-  alert(`🗑️ "${miembro}" ha sido retirado del grupo "${gNorm.nombre}".`);
+  alert(`🗑️ "${miembro}" ha sido retirado del grupo "${grupo.nombre}".`);
 }
 
 // Abandonar grupo voluntariamente
 async function abandonarGrupo(grupoId) {
-  const grupo = (listaGrupos || []).find(g => g && g.id === grupoId);
+  const grupo = listaGrupos.find(g => g.id === grupoId);
   if (!grupo) return;
-  const gNorm = normalizarGrupo(grupo);
 
-  const confirmar = confirm(`¿Deseas salir del grupo "${gNorm.nombre}"?\nYa no tendrás acceso a su cuadrante ni a sus planes.`);
+  const confirmar = confirm(`¿Deseas salir del grupo "${grupo.nombre}"?\nYa no tendrás acceso a su cuadrante ni a sus planes.`);
   if (!confirmar) return;
 
-  grupo.miembros = (grupo.miembros || []).filter(m => String(m).toLowerCase() !== (usuarioLogueado || '').toLowerCase());
-  try { localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos)); } catch(e) {}
+  grupo.miembros = (grupo.miembros || []).filter(m => m.toLowerCase() !== (usuarioLogueado || '').toLowerCase());
+  localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos));
   await sincronizarGrupoEnSupabase(grupo);
 
   const restantes = obtenerGruposVisibles(usuarioLogueado);
-  const nuevoG = restantes.length > 0 ? obtenerNombreGrupo(restantes[0]) : 'Amigos';
+  const nuevoG = restantes.length > 0 ? restantes[0].nombre : '';
   cambiarGrupo(nuevoG);
-  alert(`👋 Has salido del grupo "${gNorm.nombre}".`);
+  alert(`👋 Has salido del grupo "${grupo.nombre}".`);
 }
 
 // Unirse a un grupo mediante código de invitación (RPC Supabase o Local)
@@ -1966,36 +1374,8 @@ async function unirseAGrupoConCodigo() {
     console.warn('RPC join_group_with_code no disponible, usando fallback:', err);
   }
 
-  // 2. Fallback de retrocompatibilidad con lista de grupos sincronizados
-  const grupo = (listaGrupos || []).find(g => {
-    if (!g) return false;
-    const gNorm = normalizarGrupo(g);
-    return (gNorm.codigo_acceso || '').toUpperCase() === codigo || (g.id || '').toUpperCase() === codigo;
-  });
-  if (!grupo) {
-    if (btnUnirseConCodigo) btnUnirseConCodigo.textContent = '🔑 Unirme al Grupo';
-    return alert(`❌ Código "${codigo}" no encontrado o caducado.\nPide al administrador del grupo que te facilite el código o enlace actualizado.`);
-  }
-
-  const gNorm = normalizarGrupo(grupo);
-  const usuarioActual = usuarioLogueado || 'Cule';
-  if (!Array.isArray(grupo.miembros)) grupo.miembros = [];
-  if (grupo.miembros.some(m => String(m).toLowerCase() === usuarioActual.toLowerCase())) {
-    cambiarGrupo(gNorm.nombre);
-    if (btnUnirseConCodigo) btnUnirseConCodigo.textContent = '🔑 Unirme al Grupo';
-    return alert(`Ya perteneces al grupo "${gNorm.nombre}". ¡Te hemos llevado a él!`);
-  }
-
-  grupo.miembros.push(usuarioActual);
-  try { localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos)); } catch(e) {}
-  await sincronizarGrupoEnSupabase(grupo);
-
-  if (inputCodigoUnirse) inputCodigoUnirse.value = '';
   if (btnUnirseConCodigo) btnUnirseConCodigo.textContent = '🔑 Unirme al Grupo';
-  cambiarGrupo(gNorm.nombre);
-
-  if (typeof confetti === 'function') confetti({ particleCount: 50, spread: 80 });
-  alert(`🎉 ¡Enhorabuena! Te has unido con éxito al grupo privado "${grupo.icono || '👥'} ${grupo.nombre}".`);
+  alert('❌ No se pudo comprobar el código. Revisa tu conexión e inténtalo de nuevo.');
 }
 
 // Crear nuevo grupo privado desde la pestaña
@@ -2005,37 +1385,18 @@ async function guardarNuevoGrupoDesdePestana() {
 
   if (!nombre) return alert('Por favor, indica un nombre para el grupo (ej: Urgencias, Padel, Pareja...).');
 
-  const id = nombre.toLowerCase().replace(/\s+/g, '-');
   if (listaGrupos.some(g => g.nombre.toLowerCase() === nombre.toLowerCase())) {
     return alert('Ya existe un grupo con este nombre.');
   }
 
   btnGuardarNuevoGrupoTab.textContent = 'Creando...';
-  const creador = usuarioLogueado || 'Cule';
-  const codigo = generarCodigoAcceso(nombre);
-
-  const nuevoGrupoObj = {
-    id,
-    nombre,
-    icono,
-    creador,
-    miembros: [creador],
-    codigo_acceso: codigo,
-    descripcion: `Grupo privado administrado por ${creador}`
-  };
-
+  const creador = usuarioLogueado;
+  const nuevoGrupoObj = await crearGrupoEnServidor(nombre, icono, `Grupo privado administrado por ${creador}`);
+  if (!nuevoGrupoObj) { btnGuardarNuevoGrupoTab.textContent = 'Crear Grupo'; return; }
+  const codigo = await generarInvitacionGrupo(nuevoGrupoObj.id);
+  nuevoGrupoObj.codigo_acceso = codigo;
   listaGrupos.push(nuevoGrupoObj);
   localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos));
-  await sincronizarGrupoEnSupabase(nuevoGrupoObj);
-
-  // Intentar registrar invitación oficial en Supabase si la tabla existe
-  try {
-    await supabaseApp.from('groups').insert({
-      name: nombre,
-      icono: icono,
-      created_by: (await supabaseApp.auth.getUser())?.data?.user?.id
-    });
-  } catch (e) {}
 
   if (nuevoGrupoNombreTab) nuevoGrupoNombreTab.value = '';
   if (nuevoGrupoIconoTab) nuevoGrupoIconoTab.value = '';
@@ -2049,28 +1410,27 @@ async function guardarNuevoGrupoDesdePestana() {
 
 // Editar grupo activo (Nombre e Icono)
 async function editarGrupoActivo() {
-  const grupo = (listaGrupos || []).find(g => obtenerNombreGrupo(g).toLowerCase() === (grupoActivo || '').toLowerCase());
+  const grupo = listaGrupos.find(g => g.nombre.toLowerCase() === grupoActivo.toLowerCase());
   if (!grupo) return;
-  const gNorm = normalizarGrupo(grupo);
 
   if (!esAdmin && !esAdminDelGrupo(grupo, usuarioLogueado)) {
-    return alert(`🔒 Solo el administrador (${gNorm.creador}) puede editar los datos de este grupo.`);
+    return alert(`🔒 Solo el administrador (${grupo.creador}) puede editar los datos de este grupo.`);
   }
 
-  const nuevoNombre = prompt(`Nombre para el grupo "${gNorm.nombre}":`, gNorm.nombre);
+  const nuevoNombre = prompt(`Nombre para el grupo "${grupo.nombre}":`, grupo.nombre);
   if (!nuevoNombre || !nuevoNombre.trim()) return;
 
   const nuevoIcono = prompt(`Icono emoji para el grupo (ej: 💼, 🍻, ⚽):`, grupo.icono || '👥') || grupo.icono;
 
+  const nombreAntiguo = grupo.nombre;
   grupo.nombre = nuevoNombre.trim();
-  grupo.name = nuevoNombre.trim();
-  grupo.icono = (nuevoIcono || '👥').trim();
+  grupo.icono = nuevoIcono.trim();
 
-  try { localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos)); } catch(e) {}
+  localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos));
   await sincronizarGrupoEnSupabase(grupo);
 
   grupoActivo = grupo.nombre;
-  try { localStorage.setItem('kedadas_grupo_activo', grupoActivo); } catch(e) {}
+  localStorage.setItem('kedadas_grupo_activo', grupoActivo);
 
   renderizarSelectorGrupos();
   renderizarPanelGestionGrupoActivo();
@@ -2080,28 +1440,28 @@ async function editarGrupoActivo() {
 
 // Eliminar grupo activo
 async function eliminarGrupoActivo() {
-  const grupo = (listaGrupos || []).find(g => obtenerNombreGrupo(g).toLowerCase() === (grupoActivo || '').toLowerCase());
+  const grupo = listaGrupos.find(g => g.nombre.toLowerCase() === grupoActivo.toLowerCase());
   if (!grupo) return;
-  const gNorm = normalizarGrupo(grupo);
 
   if (!esAdmin && !esAdminDelGrupo(grupo, usuarioLogueado)) {
-    return alert(`🔒 Solo el administrador (${gNorm.creador}) puede eliminar este grupo.`);
+    return alert(`🔒 Solo el administrador (${grupo.creador}) puede eliminar este grupo.`);
   }
 
-  const confirmar = confirm(`⚠️ ¿ELIMINAR GRUPO "${gNorm.nombre}" DEFINITIVAMENTE?\nSe eliminará el grupo para todos sus miembros. Esta acción no se puede deshacer.`);
+  const confirmar = confirm(`⚠️ ¿ELIMINAR GRUPO "${grupo.nombre}" DEFINITIVAMENTE?\nSe eliminará el grupo para todos sus miembros. Esta acción no se puede deshacer.`);
   if (!confirmar) return;
 
   try {
-    await supabaseApp.from('grupos').delete().eq('id', grupo.id);
+    const { error: errDel } = await supabaseApp.from('groups').delete().eq('id', grupo.id);
+    if (errDel) return alert('No se pudo eliminar el grupo: ' + errDel.message);
   } catch (e) {}
 
-  listaGrupos = (listaGrupos || []).filter(g => g && g.id !== grupo.id);
-  try { localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos)); } catch(e) {}
+  listaGrupos = listaGrupos.filter(g => g.id !== grupo.id);
+  localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos));
 
   const restantes = obtenerGruposVisibles(usuarioLogueado);
-  const siguiente = restantes.length > 0 ? obtenerNombreGrupo(restantes[0]) : 'Amigos';
-  cambiarGrupo(siguiente);
-  alert(`🗑️ El grupo "${gNorm.nombre}" ha sido eliminado.`);
+  if (restantes.length > 0) cambiarGrupo(restantes[0].nombre);
+  else { grupoActivo = ''; renderizarSelectorGrupos(); actualizarBannerGrupo(); }
+  alert(`🗑️ El grupo "${grupo.nombre}" ha sido eliminado.`);
 }
 
 // Conectar eventos de la pestaña de grupos y administración
@@ -2113,13 +1473,12 @@ if (selectorGrupoActivo) {
 
 if (btnCopiarCodigoGrupo) {
   btnCopiarCodigoGrupo.addEventListener('click', async () => {
-    const grupo = (listaGrupos || []).find(g => obtenerNombreGrupo(g).toLowerCase() === (grupoActivo || '').toLowerCase());
-    const gNorm = grupo ? normalizarGrupo(grupo) : null;
-    const codigo = gNorm ? gNorm.codigo_acceso : '';
+    const grupo = listaGrupos.find(g => g.nombre.toLowerCase() === grupoActivo.toLowerCase());
+    const codigo = grupo ? normalizarGrupo(grupo).codigo_acceso : '';
     if (!codigo) return alert('No hay código de invitación disponible.');
 
     const enlaceInvitacion = `${window.location.origin}${window.location.pathname}?unirse=${codigo}`;
-    const textoMensaje = `¡Hola! Únete a mi grupo "${gNorm.nombre}" en Kedadas para ver cuándo coincidimos libres:\n${enlaceInvitacion}\n(O introduce el código ${codigo} en la app)`;
+    const textoMensaje = `¡Hola! Únete a mi grupo "${grupo.nombre}" en Kedadas para ver cuándo coincidimos libres:\n${enlaceInvitacion}\n(O introduce el código ${codigo} en la app)`;
 
     if (navigator.share) {
       try {
@@ -2203,15 +1562,15 @@ function renderizarPanelGrupos() {
     const info = document.createElement('div');
     info.className = 'user-card-info';
     info.innerHTML = `
-      <div class="user-avatar-initial" style="background: transparent; font-size: 1.5rem;">${escapeHtml(g.icono || '👥')}</div>
-      <div class="user-name-text">${escapeHtml(g.nombre)} <small style="color:#64748b;">(${g.miembros?.length || 0} miembros)</small></div>
+      <div class="user-avatar-initial" style="background: transparent; font-size: 1.5rem;">${escapeHTML(g.icono || '👥')}</div>
+      <div class="user-name-text">${escapeHTML(g.nombre)} <small style="color:#64748b;">(${g.miembros?.length || 0} miembros)</small></div>
     `;
 
     const controls = document.createElement('div');
     controls.className = 'user-card-controls';
 
     const btnVer = document.createElement('button');
-    btnVer.className = 'btn-accion-mini btn-guardar-pin-mini';
+    btnVer.className = 'btn-guardar-pin-mini';
     btnVer.textContent = 'Ver grupo';
     btnVer.addEventListener('click', () => {
       cambiarGrupo(g.nombre);
@@ -2231,14 +1590,11 @@ if (btnGuardarNuevoGrupoModal) {
     const icono = (nuevoGrupoIconoModal?.value || '').trim() || '👥';
     if (!nombre) return alert('Por favor, indica un nombre para el grupo.');
 
-    const creador = usuarioLogueado || 'Cule';
-    const id = nombre.toLowerCase().replace(/\s+/g, '-');
-    const codigo = generarCodigoAcceso(nombre);
-
-    const nuevoObj = { id, nombre, icono, creador, miembros: [creador], codigo_acceso: codigo };
+    const nuevoObj = await crearGrupoEnServidor(nombre, icono, `Grupo privado administrado por ${usuarioLogueado}`);
+    if (!nuevoObj) return;
+    nuevoObj.codigo_acceso = await generarInvitacionGrupo(nuevoObj.id);
     listaGrupos.push(nuevoObj);
     localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos));
-    await sincronizarGrupoEnSupabase(nuevoObj);
 
     if (nuevoGrupoNombreModal) nuevoGrupoNombreModal.value = '';
     if (nuevoGrupoIconoModal) nuevoGrupoIconoModal.value = '';
@@ -2307,492 +1663,74 @@ selectorUsuario.addEventListener('change', (e) => {
 });
 
 // --- 5. LÓGICA DE TURNOS DUAL (SUPABASE + LOCAL STORAGE POR GRUPO) ---
-async function guardarTurnoNube(dia, indiceEstado, mesAnioEspecifico = null) {
+async function guardarTurnoNube(dia, indiceEstado, mesAnioEspecifico = null, sincronizar = true) {
   const mesAnio = mesAnioEspecifico || `${fechaNavegacion.getFullYear()}-${fechaNavegacion.getMonth()}`;
-  
-  // 1. Guardar de inmediato en almacenamiento local para el grupo y usuario activo
-  const keyLocal = `kedadas_turnos_${grupoActivo}_${miUsuario}_${mesAnio}`;
-  let turnosLocales = [];
-  try {
-    const raw = localStorage.getItem(keyLocal);
-    if (raw) turnosLocales = JSON.parse(raw);
-  } catch(e) {}
-  
-  const idx = turnosLocales.findIndex(t => t.dia === dia);
-  if (idx >= 0) {
-    turnosLocales[idx].indiceEstado = indiceEstado;
-  } else {
-    turnosLocales.push({ dia, usuario: miUsuario, indiceEstado, mes_anio: mesAnio });
-  }
-  localStorage.setItem(keyLocal, JSON.stringify(turnosLocales));
 
-  // 2. Guardar en Supabase
-  try {
-    let { data: existentes } = await supabaseApp.from('Turnos')
-      .select('id')
-      .eq('dia', dia)
-      .eq('usuario', miUsuario)
-      .eq('mes_anio', mesAnio);
-
-    if (existentes && existentes.length > 0) {
-      await supabaseApp.from('Turnos').update({ indiceEstado: indiceEstado }).eq('id', existentes[0].id);
-    } else {
-      await supabaseApp.from('Turnos').insert({
-        dia: dia,
-        usuario: miUsuario,
-        usuario_id: miUserId,
-        indiceEstado: indiceEstado,
-        mes_anio: mesAnio
-      });
-    }
-  } catch (e) {
-    console.warn('Aviso guardando turno en Supabase:', e);
-  }
-}
-
-// =========================================================================
-// --- 5B. SISTEMA DE PRIVACIDAD Y COMPARTICIÓN DE HORARIOS ENTRE USUARIOS -
-// =========================================================================
-const STORAGE_PERMISOS_CALENDARIO_KEY = 'kedadas_calendario_permisos_v1';
-let mapaPermisosCalendarios = {}; // { [ownerLower]: Set([viewerLower1, viewerLower2]) }
-
-function cargarPermisosLocales() {
-  try {
-    const raw = localStorage.getItem(STORAGE_PERMISOS_CALENDARIO_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      mapaPermisosCalendarios = {};
-      for (const [owner, viewers] of Object.entries(parsed)) {
-        if (Array.isArray(viewers)) {
-          mapaPermisosCalendarios[owner.toLowerCase()] = new Set(viewers.map(v => String(v).toLowerCase()));
-        }
-      }
-    }
-  } catch (e) {
-    mapaPermisosCalendarios = {};
-  }
-}
-
-function guardarPermisosLocales() {
-  try {
-    const obj = {};
-    for (const [owner, setViewers] of Object.entries(mapaPermisosCalendarios)) {
-      obj[owner] = Array.from(setViewers);
-    }
-    localStorage.setItem(STORAGE_PERMISOS_CALENDARIO_KEY, JSON.stringify(obj));
-  } catch (e) {}
-}
-
-// Cargar permisos desde la tabla calendar_shares en Supabase
-async function cargarPermisosCalendarioDesdeBD() {
-  cargarPermisosLocales();
-  try {
-    const { data, error } = await supabaseApp.from('calendar_shares').select('*');
-    if (!error && Array.isArray(data)) {
-      data.forEach(row => {
-        const owner = (row.owner_name || '').trim().toLowerCase();
-        const viewer = (row.granted_to || '').trim().toLowerCase();
-        if (owner && viewer) {
-          if (!mapaPermisosCalendarios[owner]) mapaPermisosCalendarios[owner] = new Set();
-          mapaPermisosCalendarios[owner].add(viewer);
-        }
-      });
-      guardarPermisosLocales();
-    }
-  } catch (e) {
-    console.warn('Aviso cargando calendar_shares de Supabase:', e);
-  }
-}
-
-// Comprueba si `viewer` tiene permiso para ver el horario de `owner`
-function tienePermisoCalendario(owner, viewer) {
-  if (!owner || !viewer) return false;
-  const o = String(owner).trim().toLowerCase();
-  const v = String(viewer).trim().toLowerCase();
-  if (o === v) return true;
-  const permitidos = mapaPermisosCalendarios[o];
-  return Boolean(permitidos && permitidos.has(v));
-}
-
-// Conceder permiso para que `viewer` pueda ver el calendario de `owner`
-async function concederPermisoCalendario(owner, viewer) {
-  if (!owner || !viewer) return false;
-  const o = String(owner).trim().toLowerCase();
-  const v = String(viewer).trim().toLowerCase();
-  if (o === v) return true;
-
-  if (!mapaPermisosCalendarios[o]) mapaPermisosCalendarios[o] = new Set();
-  mapaPermisosCalendarios[o].add(v);
-  guardarPermisosLocales();
-
-  try {
-    await supabaseApp.from('calendar_shares').upsert({
-      owner_name: owner.trim(),
-      granted_to: viewer.trim()
-    }, { onConflict: 'owner_name,granted_to' });
-  } catch (e) {
-    console.warn('Aviso guardando calendar_share en Supabase:', e);
-  }
-
-  return true;
-}
-
-// Revocar permiso
-async function revocarPermisoCalendario(owner, viewer) {
-  if (!owner || !viewer) return false;
-  const o = String(owner).trim().toLowerCase();
-  const v = String(viewer).trim().toLowerCase();
-
-  if (mapaPermisosCalendarios[o]) {
-    mapaPermisosCalendarios[o].delete(v);
-    guardarPermisosLocales();
-  }
-
-  try {
-    await supabaseApp.from('calendar_shares').delete()
-      .eq('owner_name', owner.trim())
-      .eq('granted_to', viewer.trim());
-  } catch (e) {
-    console.warn('Aviso eliminando calendar_share en Supabase:', e);
-  }
-
-  return true;
-}
-
-// Compartir con todos los miembros del grupo actual
-async function compartirHorarioConTodoElGrupo() {
-  const yo = (usuarioLogueado || 'Cule').trim();
-  const miembros = (typeof obtenerMiembrosGrupo === 'function') ? obtenerMiembrosGrupo(grupoActivo) : [];
-  let anadidos = 0;
-  for (const m of miembros) {
-    if (m && String(m).toLowerCase() !== yo.toLowerCase()) {
-      await concederPermisoCalendario(yo, m);
-      anadidos++;
-    }
-  }
-  renderizarListaPermisosModal();
-  actualizarBannerPrivacidadCal();
-  try { renderizarSelectoresUsuarios(); } catch(e) {}
-  if (typeof confetti === 'function') confetti({ particleCount: 30, spread: 60 });
-  alert(`✅ Has compartido tu horario con los miembros del grupo "${grupoActivo}".`);
-}
-
-// Hacer 100% privado (revocar todos los accesos a mi horario)
-async function privatizarTodoMiHorario() {
-  const yo = (usuarioLogueado || 'Cule').trim();
-  const seguro = confirm('¿Deseas revocar todos los accesos a tu horario?\nNadie más podrá ver tus turnos salvo que vuelvas a invitarles.');
-  if (!seguro) return;
-
-  const o = yo.toLowerCase();
-  if (mapaPermisosCalendarios[o]) {
-    mapaPermisosCalendarios[o].clear();
-    guardarPermisosLocales();
-  }
-
-  try {
-    await supabaseApp.from('calendar_shares').delete().eq('owner_name', yo);
-  } catch (e) {}
-
-  renderizarListaPermisosModal();
-  actualizarBannerPrivacidadCal();
-  try { renderizarSelectoresUsuarios(); } catch(e) {}
-  alert('🔒 Tu horario ahora es 100% privado. Solo tú puedes ver tus turnos.');
-}
-
-// Generar enlace de invitación para compartir mi horario
-function generarEnlaceCompartirHorario(owner) {
-  const baseUser = (owner || usuarioLogueado || 'Cule').trim();
-  return `${window.location.origin}${window.location.pathname}?compartir_horario_de=${encodeURIComponent(baseUser)}`;
-}
-
-// Detectar si se ha abierto un enlace de compartir horario
-async function comprobarParametroCompartirHorarioUrl() {
-  try {
-    const urlParams = new URLSearchParams(window.location.search);
-    const ownerParam = urlParams.get('compartir_horario_de') || urlParams.get('ver_horario_de') || urlParams.get('horario_de');
-    if (ownerParam) {
-      const ownerLimpio = ownerParam.trim();
-      const yo = (usuarioLogueado || 'Cule').trim();
-      
-      await concederPermisoCalendario(ownerLimpio, yo);
-
-      // Limpiar URL sin recargar la página
-      const url = new URL(window.location);
-      url.searchParams.delete('compartir_horario_de');
-      url.searchParams.delete('ver_horario_de');
-      url.searchParams.delete('horario_de');
-      window.history.replaceState({}, document.title, url.toString());
-
-      if (typeof confetti === 'function') confetti({ particleCount: 60, spread: 80 });
-      alert(`🎉 ¡"${ownerLimpio}" ha compartido su horario contigo!\nAhora tienes acceso para ver sus turnos en el cuadrante.`);
-
-      miUsuario = ownerLimpio;
-      if (selectorUsuario) selectorUsuario.value = miUsuario;
-      iniciarCalendario();
-    }
-  } catch (e) {}
-}
-
-// Pedir a un usuario que me comparta su horario
-function pedirCompartirHorario(targetUsuario) {
-  const yo = (usuarioLogueado || 'Mi usuario').trim();
-  const mensaje = `¡Hola ${targetUsuario}! ¿Me compartes tu horario en Kedadas para ver cuándo libramos? Entra en la app y toca "Compartir Horario" -> "Permitir a ${yo}".`;
-
-  if (navigator.share) {
-    navigator.share({
-      title: `Kedadas - Solicitud de horario de ${yo}`,
-      text: mensaje
-    }).catch(() => {});
-    return;
-  }
-
-  if (navigator.clipboard) {
-    navigator.clipboard.writeText(mensaje).then(() => {
-      alert(`📋 Mensaje copiado al portapapeles:\n\n"${mensaje}"\n\nPégalo en WhatsApp para enviárselo a ${targetUsuario}.`);
-    }).catch(() => {
-      alert(mensaje);
-    });
-  } else {
-    alert(mensaje);
-  }
-}
-
-// Actualizar banner superior cuando se consulta un horario ajeno compartido
-function actualizarBannerPrivacidadCal() {
-  const banner = document.getElementById('banner-privacidad-cal');
-  if (!banner) return;
-
-  const esPropio = ((miUsuario || '').toLowerCase() === (usuarioLogueado || '').toLowerCase());
-  if (esPropio) {
-    banner.style.display = 'none';
-    banner.className = 'banner-privacidad-cal';
-    banner.innerHTML = '';
-    return;
-  }
-
-  const tieneAcceso = tienePermisoCalendario(miUsuario, usuarioLogueado);
-  if (tieneAcceso) {
-    banner.style.display = 'flex';
-    banner.className = 'banner-privacidad-cal modo-lectura';
-    banner.innerHTML = `
-      <div>
-        <span>🔓 Estás viendo el horario compartido de <strong>${escapeHtml(miUsuario)}</strong> (Modo solo lectura)</span>
-      </div>
-      <button type="button" class="btn-volver-propio-pill" id="btn-banner-volver-propio">👤 Volver al mío (${escapeHtml(usuarioLogueado || 'Tú')})</button>
-    `;
-    const btnVolver = document.getElementById('btn-banner-volver-propio');
-    if (btnVolver) {
-      btnVolver.addEventListener('click', () => {
-        miUsuario = usuarioLogueado || 'Cule';
-        if (selectorUsuario) selectorUsuario.value = miUsuario;
-        iniciarCalendario();
-      });
-    }
-  } else {
-    banner.style.display = 'none';
-  }
-}
-
-// Abrir y gestionar la modal de compartir horario
-function abrirModalCompartirHorario() {
-  const modal = document.getElementById('modal-compartir-horario');
-  if (!modal) return;
-
-  const yo = (usuarioLogueado || 'Cule').trim();
-  const inputLink = document.getElementById('input-enlace-compartir-horario');
-  if (inputLink) {
-    inputLink.value = generarEnlaceCompartirHorario(yo);
-  }
-
-  renderizarListaPermisosModal();
-  modal.style.display = 'flex';
-}
-
-function cerrarModalCompartirHorario() {
-  const modal = document.getElementById('modal-compartir-horario');
-  if (modal) modal.style.display = 'none';
-  actualizarBannerPrivacidadCal();
-}
-
-function renderizarListaPermisosModal() {
-  const yo = (usuarioLogueado || 'Cule').trim();
-  const contenedor = document.getElementById('lista-permisos-usuarios-contenedor');
-  if (!contenedor) return;
-
-  contenedor.innerHTML = '';
-
-  const candidatosSet = new Set();
-  const miembrosGrupo = (typeof obtenerMiembrosGrupo === 'function') ? obtenerMiembrosGrupo(grupoActivo) : [];
-  miembrosGrupo.forEach(m => { if (m) candidatosSet.add(String(m).trim()); });
-  (usuarios || []).forEach(u => { if (u) candidatosSet.add(String(u).trim()); });
-  (listaPerfiles || []).forEach(p => { if (p && p.nombre) candidatosSet.add(String(p.nombre).trim()); });
-
-  candidatosSet.delete(yo);
-  const candidatos = Array.from(candidatosSet).sort();
-
-  if (candidatos.length === 0) {
-    contenedor.innerHTML = '<p style="text-align:center; color:#64748b; font-size:0.85rem; padding:15px;">No hay otros usuarios registrados en el grupo.</p>';
-    return;
-  }
-
-  candidatos.forEach(nombre => {
-    const permitido = tienePermisoCalendario(yo, nombre);
-    const item = document.createElement('div');
-    item.className = 'item-permiso-usuario';
-
-    item.innerHTML = `
-      <div class="item-permiso-user-info">
-        <div class="item-permiso-avatar">${escapeHtml(nombre.charAt(0).toUpperCase())}</div>
-        <div>
-          <div class="item-permiso-name-txt">${escapeHtml(nombre)}</div>
-          <span class="item-permiso-badge-status ${permitido ? 'permitido' : 'denegado'}">
-            ${permitido ? '✅ Acceso concedido' : '🔒 Privado'}
-          </span>
-        </div>
-      </div>
-      <button type="button" class="btn-toggle-permiso-mini ${permitido ? 'revocar' : 'permitir'}">
-        ${permitido ? '❌ Revocar' : '➕ Dar Acceso'}
-      </button>
-    `;
-
-    const btnToggle = item.querySelector('.btn-toggle-permiso-mini');
-    btnToggle.addEventListener('click', async () => {
-      if (permitido) {
-        await revocarPermisoCalendario(yo, nombre);
-      } else {
-        await concederPermisoCalendario(yo, nombre);
-      }
-      renderizarListaPermisosModal();
-      actualizarBannerPrivacidadCal();
-      try { renderizarSelectoresUsuarios(); } catch(e) {}
-    });
-
-    contenedor.appendChild(item);
-  });
-
-  // Sección 3: Horarios compartidos conmigo
-  const seccionCompartidos = document.getElementById('seccion-compartidos-conmigo');
-  const contenedorCompartidos = document.getElementById('lista-compartidos-conmigo-contenedor');
-  if (seccionCompartidos && contenedorCompartidos) {
-    const compartidosConmigo = [];
-    for (const [ownerLower, viewersSet] of Object.entries(mapaPermisosCalendarios)) {
-      if (ownerLower !== yo.toLowerCase() && viewersSet.has(yo.toLowerCase())) {
-        const origUser = (usuarios || []).find(u => u.toLowerCase() === ownerLower) || ownerLower;
-        compartidosConmigo.push(origUser);
-      }
-    }
-
-    if (compartidosConmigo.length > 0) {
-      seccionCompartidos.style.display = 'block';
-      contenedorCompartidos.innerHTML = '';
-      compartidosConmigo.forEach(ownerNombre => {
-        const item = document.createElement('div');
-        item.className = 'item-permiso-usuario';
-        item.innerHTML = `
-          <div class="item-permiso-user-info">
-            <div class="item-permiso-avatar" style="background: linear-gradient(135deg, #10b981, #059669);">📅</div>
-            <div>
-              <div class="item-permiso-name-txt">${escapeHtml(ownerNombre)}</div>
-              <span class="item-permiso-badge-status permitido">Te ha dado acceso</span>
-            </div>
-          </div>
-          <button type="button" class="btn-toggle-permiso-mini permitir">📅 Ver Cuadrante</button>
-        `;
-        const btnVer = item.querySelector('.btn-toggle-permiso-mini');
-        btnVer.addEventListener('click', () => {
-          cerrarModalCompartirHorario();
-          miUsuario = ownerNombre;
-          if (selectorUsuario) selectorUsuario.value = miUsuario;
-          iniciarCalendario();
-        });
-        contenedorCompartidos.appendChild(item);
-      });
-    } else {
-      seccionCompartidos.style.display = 'none';
-      contenedorCompartidos.innerHTML = '';
-    }
-  }
-}
-
-function inicializarEventosCompartirHorario() {
-  const btnAbrir = document.getElementById('btn-abrir-compartir-horario');
-  const btnPerfilAbrir = document.getElementById('btn-perfil-compartir-horario');
-  const btnCerrar = document.getElementById('btn-cerrar-modal-compartir');
-  const btnCerrarFooter = document.getElementById('btn-cerrar-compartir-footer');
-  const btnCopiar = document.getElementById('btn-copiar-enlace-horario');
-  const btnWhatsapp = document.getElementById('btn-whatsapp-compartir-horario');
-  const btnTodoGrupo = document.getElementById('btn-compartir-todo-grupo');
-  const btnPrivatizar = document.getElementById('btn-privatizar-todo-horario');
-
-  if (btnAbrir) btnAbrir.addEventListener('click', abrirModalCompartirHorario);
-  if (btnPerfilAbrir) btnPerfilAbrir.addEventListener('click', abrirModalCompartirHorario);
-  if (btnCerrar) btnCerrar.addEventListener('click', cerrarModalCompartirHorario);
-  if (btnCerrarFooter) btnCerrarFooter.addEventListener('click', cerrarModalCompartirHorario);
-
-  if (btnCopiar) {
-    btnCopiar.addEventListener('click', async () => {
-      const yo = (usuarioLogueado || 'Cule').trim();
-      const link = generarEnlaceCompartirHorario(yo);
-      try {
-        await navigator.clipboard.writeText(link);
-        const originalText = btnCopiar.textContent;
-        btnCopiar.textContent = '✅ ¡Copiado!';
-        setTimeout(() => { btnCopiar.textContent = originalText; }, 2000);
-        alert(`📋 Enlace copiado al portapapeles:\n\n${link}\n\nEnvíalo a quien quieras dar acceso a tu horario.`);
-      } catch (e) {
-        prompt('Copia este enlace de invitación:', link);
-      }
-    });
-  }
-
-  if (btnWhatsapp) {
-    btnWhatsapp.addEventListener('click', () => {
-      const yo = (usuarioLogueado || 'Cule').trim();
-      const link = generarEnlaceCompartirHorario(yo);
-      const texto = `¡Hola! Aquí tienes mi horario de turnos en Kedadas para que podamos ver cuándo libramos juntos:\n${link}`;
-      window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(texto)}`, '_blank');
-    });
-  }
-
-  if (btnTodoGrupo) btnTodoGrupo.addEventListener('click', compartirHorarioConTodoElGrupo);
-  if (btnPrivatizar) btnPrivatizar.addEventListener('click', privatizarTodoMiHorario);
-}
-
-// Comprobar si el usuario conectado tiene autorización para ver el calendario de `targetUsuario`
-async function verificarPermisoCalendario(targetUsuario) {
-  const viewer = (usuarioLogueado || '').trim();
-  const owner = (targetUsuario || '').trim();
-
-  // 1. Si no hay usuario especificado o es mi propio calendario -> Autorizado
-  if (!owner || !viewer || owner.toLowerCase() === viewer.toLowerCase()) {
-    return { autorizado: true, esPropio: true, motivo: 'propio' };
-  }
-
-  // 2. Comprobar si el dueño (owner) le ha concedido permiso al espectador (viewer)
-  if (tienePermisoCalendario(owner, viewer)) {
-    return { autorizado: true, esPropio: false, motivo: 'compartido' };
-  }
-
-  // 3. De lo contrario, acceso denegado (Protegido por privacidad)
-  return { autorizado: false, esPropio: false, motivo: 'privado' };
-}
-
-async function obtenerTurnosMesNube() {
-  const mesAnio = `${fechaNavegacion.getFullYear()}-${fechaNavegacion.getMonth()}`;
-  const esPropio = ((miUsuario || '').toLowerCase() === (usuarioLogueado || '').toLowerCase());
-
-  // 1. Verificación estricta de autorización
-  const permiso = await verificarPermisoCalendario(miUsuario);
-  if (!permiso.autorizado) {
-    return { autorizado: false, turnos: [] };
-  }
-
+  // 1. Copia local inmediata
   const keyLocal = `kedadas_turnos_${miUsuario}_${mesAnio}`;
   let turnosLocales = [];
   try {
     const raw = localStorage.getItem(keyLocal);
     if (raw) turnosLocales = JSON.parse(raw);
-  } catch(e) {}
+  } catch (e) {}
+  const idx = turnosLocales.findIndex(t => t.dia === dia);
+  if (idx >= 0) turnosLocales[idx].indiceEstado = indiceEstado;
+  else turnosLocales.push({ dia, usuario: miUsuario, indiceEstado, mes_anio: mesAnio });
+  localStorage.setItem(keyLocal, JSON.stringify(turnosLocales));
+
+  // 2. Supabase: una única operación (el horario es de la persona, no del grupo)
+  if (!sincronizar) return true;
+  try {
+    const { error } = await supabaseApp.from('Turnos')
+      .upsert({ dia, usuario: miUsuario, indiceEstado, mes_anio: mesAnio }, { onConflict: 'usuario,dia,mes_anio' });
+    if (error) throw error;
+    return true;
+  } catch (e) {
+    console.warn('Aviso guardando turno en Supabase:', e);
+    return false;
+  }
+}
+
+// Comprobar si el usuario conectado tiene autorización para ver el calendario de `targetUsuario`
+async function verificarPermisoCalendario(targetUsuario) {
+  const usuarioActual = (usuarioLogueado || miUsuario || '').trim().toLowerCase();
+  const objetivo = (targetUsuario || '').trim().toLowerCase();
+
+  // REGLA 1: Cule es el Superadministrador Global -> Control total para ver y gestionar cualquier cuadrante
+  if (esAdmin) {
+    return { autorizado: true, esPropio: (objetivo === usuarioActual), esSuperadmin: true };
+  }
+
+  // REGLA 2: Es mi propio calendario -> Autorizado siempre
+  if (!objetivo || objetivo === usuarioActual) {
+    return { autorizado: true, esPropio: true };
+  }
+
+  // REGLA 3: Usuarios estándar -> Privacidad estricta: NADIE puede ver el calendario de otro directamente
+  return { autorizado: false, esPropio: false, motivo: 'privacidad_estricta_estandar' };
+}
+
+async function obtenerTurnosMesNube() {
+  const mesAnio = `${fechaNavegacion.getFullYear()}-${fechaNavegacion.getMonth()}`;
+  const esPropio = (miUsuario.toLowerCase() === (usuarioLogueado || '').toLowerCase());
+  const keyLocal = `kedadas_turnos_${miUsuario}_${mesAnio}`;
+  
+  // 1. REGLA ESTRICTA DE PRIVACIDAD: Si estamos consultando a otra persona, verificar permiso
+  if (!esPropio) {
+    const perm = await verificarPermisoCalendario(miUsuario);
+    if (!perm.autorizado) {
+      // Si NO está autorizado, nunca devolver datos de localStorage y retornar estado no autorizado
+      return { autorizado: false, turnos: [] };
+    }
+  }
+
+  let turnosLocales = [];
+  if (esPropio) {
+    try {
+      const raw = localStorage.getItem(keyLocal);
+      if (raw) turnosLocales = JSON.parse(raw);
+    } catch(e) {}
+  }
 
   try {
     let res = await supabaseApp.from('Turnos')
@@ -2800,38 +1738,57 @@ async function obtenerTurnosMesNube() {
       .eq('usuario', miUsuario)
       .eq('mes_anio', mesAnio);
 
+    if (res.error && res.error.message && res.error.message.includes('grupo')) {
+      res = await supabaseApp.from('Turnos')
+        .select('*')
+        .eq('usuario', miUsuario)
+        .eq('mes_anio', mesAnio);
+    }
+
     if (!res.error && res.data) {
-      if (res.data.length > 0) {
-        localStorage.setItem(keyLocal, JSON.stringify(res.data));
-        return { autorizado: true, turnos: res.data };
-      } else if (turnosLocales.length > 0) {
-        return { autorizado: true, turnos: turnosLocales };
+      // Si RLS devolvió un array vacío para otra persona, significa que no hay datos accesibles
+      if (!esPropio && res.data.length === 0) {
+        const perm = await verificarPermisoCalendario(miUsuario);
+        if (!perm.autorizado) {
+          return { autorizado: false, turnos: [] };
+        }
       }
-      return { autorizado: true, turnos: [] };
+
+      if (esPropio && res.data.length > 0) {
+        localStorage.setItem(keyLocal, JSON.stringify(res.data));
+      }
+      return { autorizado: true, turnos: res.data };
     }
   } catch (e) {
     console.warn('Aviso obteniendo turnos de Supabase:', e);
   }
 
-  return { autorizado: true, turnos: turnosLocales };
+  if (esPropio) {
+    return { autorizado: true, turnos: turnosLocales };
+  } else {
+    return { autorizado: false, turnos: [] };
+  }
 }
 
 async function obtenerTurnosAnoNube() {
   const anioPrefix = `${fechaNavegacion.getFullYear()}-`;
-  const esPropio = ((miUsuario || '').toLowerCase() === (usuarioLogueado || '').toLowerCase());
+  const esPropio = (miUsuario.toLowerCase() === (usuarioLogueado || '').toLowerCase());
+  const keyLocal = `kedadas_turnos_ano_${miUsuario}_${fechaNavegacion.getFullYear()}`;
 
-  // 1. Verificación estricta de autorización
-  const permiso = await verificarPermisoCalendario(miUsuario);
-  if (!permiso.autorizado) {
-    return { autorizado: false, turnos: [] };
+  if (!esPropio) {
+    const perm = await verificarPermisoCalendario(miUsuario);
+    if (!perm.autorizado) {
+      return { autorizado: false, turnos: [] };
+    }
   }
 
-  const keyLocal = `kedadas_turnos_ano_${miUsuario}_${fechaNavegacion.getFullYear()}`;
   let turnosLocales = [];
-  try {
-    const raw = localStorage.getItem(keyLocal);
-    if (raw) turnosLocales = JSON.parse(raw);
-  } catch(e) {}
+  if (esPropio) {
+    try {
+      const raw = localStorage.getItem(keyLocal);
+      if (raw) turnosLocales = JSON.parse(raw);
+    } catch(e) {}
+  }
 
   try {
     let res = await supabaseApp.from('Turnos')
@@ -2839,20 +1796,35 @@ async function obtenerTurnosAnoNube() {
       .eq('usuario', miUsuario)
       .like('mes_anio', `${anioPrefix}%`);
 
+    if (res.error && res.error.message && res.error.message.includes('grupo')) {
+      res = await supabaseApp.from('Turnos')
+        .select('*')
+        .eq('usuario', miUsuario)
+        .like('mes_anio', `${anioPrefix}%`);
+    }
+
     if (!res.error && res.data) {
-      if (res.data.length > 0) {
-        localStorage.setItem(keyLocal, JSON.stringify(res.data));
-        return { autorizado: true, turnos: res.data };
-      } else if (turnosLocales.length > 0) {
-        return { autorizado: true, turnos: turnosLocales };
+      if (!esPropio && res.data.length === 0) {
+        const perm = await verificarPermisoCalendario(miUsuario);
+        if (!perm.autorizado) {
+          return { autorizado: false, turnos: [] };
+        }
       }
-      return { autorizado: true, turnos: [] };
+
+      if (esPropio && res.data.length > 0) {
+        localStorage.setItem(keyLocal, JSON.stringify(res.data));
+      }
+      return { autorizado: true, turnos: res.data };
     }
   } catch (e) {
     console.warn('Aviso obteniendo turnos anuales de Supabase:', e);
   }
 
-  return { autorizado: true, turnos: turnosLocales };
+  if (esPropio) {
+    return { autorizado: true, turnos: turnosLocales };
+  } else {
+    return { autorizado: false, turnos: [] };
+  }
 }
 
 // --- 6. GESTIÓN DE GUARDADO CON CONFIRMACIÓN Y RENDERIZADO CALENDARIOS ---
@@ -2899,9 +1871,11 @@ async function guardarCambiosHorarioConfirmado() {
   try {
     for (const [diaStr, nuevoIndice] of Object.entries(cambiosHorarioPendientes)) {
       const dia = parseInt(diaStr);
-      await guardarTurnoNube(dia, nuevoIndice);
+      const okTurno = await guardarTurnoNube(dia, nuevoIndice);
+      if (!okTurno) throw new Error('No se pudo sincronizar con el servidor. Tus cambios están guardados en este dispositivo.');
     }
     cambiosHorarioPendientes = {};
+    notificarCoincidencias(`${fechaNavegacion.getFullYear()}-${fechaNavegacion.getMonth()}`);
     actualizarBarraCambiosPendientes();
     alert(`✅ ¡Horario guardado con éxito! Se han actualizado ${numCambios} días en ${mesNombre} ${anio}.`);
     await renderizarMes();
@@ -2929,183 +1903,41 @@ if (btnCancelarCambiosHorario) {
   });
 }
 
-// ========================================================
-// SISTEMA DE FESTIVOS NACIONALES DE ESPAÑA (BOE / LABORAL)
-// ========================================================
-function calcularDomingoResurreccion(year) {
-  const a = year % 19;
-  const b = Math.floor(year / 100);
-  const c = year % 100;
-  const d = Math.floor(b / 4);
-  const e = b % 4;
-  const f = Math.floor((b + 8) / 25);
-  const g = Math.floor((b - f + 1) / 3);
-  const h = (19 * a + b - d - g + 15) % 30;
-  const i = Math.floor(c / 4);
-  const k = c % 4;
-  const l = (32 + 2 * e + 2 * i - h - k) % 7;
-  const m = Math.floor((a + 11 * h + 22 * l) / 451);
-  const month = Math.floor((h + l - 7 * m + 114) / 31) - 1; // 0-indexado (2 = marzo, 3 = abril)
-  const day = ((h + l - 7 * m + 114) % 31) + 1;
-  return new Date(year, month, day);
-}
-
-function obtenerFestivosNacionalesAnio(year) {
-  const festivosFijos = [
-    { mes: 0, dia: 1, nombre: 'Año Nuevo' },
-    { mes: 0, dia: 6, nombre: 'Epifanía del Señor (Reyes Magos)' },
-    { mes: 4, dia: 1, nombre: 'Fiesta del Trabajo' },
-    { mes: 7, dia: 15, nombre: 'Asunción de la Virgen' },
-    { mes: 9, dia: 12, nombre: 'Fiesta Nacional de España' },
-    { mes: 10, dia: 1, nombre: 'Todos los Santos' },
-    { mes: 11, dia: 6, nombre: 'Día de la Constitución Española' },
-    { mes: 11, dia: 8, nombre: 'Inmaculada Concepción' },
-    { mes: 11, dia: 25, nombre: 'Natividad del Señor (Navidad)' }
-  ];
-
-  const festivos = {};
-
-  festivosFijos.forEach(f => {
-    const dt = new Date(year, f.mes, f.dia);
-    festivos[`${f.mes}-${f.dia}`] = { nombre: f.nombre, esTraslado: false };
-    
-    // Si cae en domingo, en el calendario laboral español suele trasladarse al lunes siguiente
-    if (dt.getDay() === 0) {
-      const lunes = new Date(year, f.mes, f.dia + 1);
-      festivos[`${lunes.getMonth()}-${lunes.getDate()}`] = {
-        nombre: `Lunes posterior a ${f.nombre} (traslado festivo)`,
-        esTraslado: true
-      };
-    }
-  });
-
-  // Semana Santa (Viernes Santo y Jueves Santo)
-  const domingoRes = calcularDomingoResurreccion(year);
-  
-  const juevesSanto = new Date(domingoRes);
-  juevesSanto.setDate(domingoRes.getDate() - 3);
-  festivos[`${juevesSanto.getMonth()}-${juevesSanto.getDate()}`] = {
-    nombre: 'Jueves Santo',
-    esTraslado: false
-  };
-
-  const viernesSanto = new Date(domingoRes);
-  viernesSanto.setDate(domingoRes.getDate() - 2);
-  festivos[`${viernesSanto.getMonth()}-${viernesSanto.getDate()}`] = {
-    nombre: 'Viernes Santo',
-    esTraslado: false
-  };
-
-  return festivos;
-}
-
-function obtenerFestivoNacional(dia, mes, anio) {
-  const festivos = obtenerFestivosNacionalesAnio(anio);
-  return festivos[`${mes}-${dia}`] || null;
-}
-
-function normalizarIndiceEstado(valor) {
-  if (valor === undefined || valor === null) return 0;
-  if (typeof valor === 'number') {
-    if (isNaN(valor)) return 0;
-    const n = Math.floor(valor);
-    return (n >= 0 && n < estados.length) ? n : 0;
-  }
-  const str = String(valor).trim().toLowerCase();
-  if (!str || str === '0' || str === 'vacio') return 0;
-  if (str === '1' || str === 'l' || str === 'libre') return 1;
-  if (str === '2' || str === 'm' || str === 'manana' || str === 'mañana') return 2;
-  if (str === '3' || str === 't' || str === 'tarde') return 3;
-  if (str === '4' || str === 'n' || str === 'noche') return 4;
-  if (str === '5' || str === 'v' || str === 'vacaciones') return 5;
-  const num = parseInt(str, 10);
-  if (!isNaN(num) && num >= 0 && num < estados.length) return num;
-  return 0;
-}
-
 async function iniciarCalendario() {
-  try {
-    actualizarBannerGrupo();
-    actualizarBannerPrivacidadCal();
-    if (modoVista === 'mes') await renderizarMes();
-    else await renderizarAno();
-  } catch(errCal) {
-    console.error('Error renderizando calendario:', errCal);
-  }
+  actualizarBannerGrupo();
+  if (modoVista === 'mes') await renderizarMes();
+  else await renderizarAno();
 }
 
 async function renderizarMes() {
-  if (!calendarGrid) return;
   calendarGrid.innerHTML = ''; 
   const mes = fechaNavegacion.getMonth();
   const anio = fechaNavegacion.getFullYear();
-  if (tituloMes) tituloMes.textContent = `${nombresMeses[mes]} ${anio}`; 
+  tituloMes.textContent = `${nombresMeses[mes]} ${anio}`; 
 
   const diasEnElMes = new Date(anio, mes + 1, 0).getDate();
   let diaEmpieza = new Date(anio, mes, 1).getDay();
   diaEmpieza = diaEmpieza === 0 ? 6 : diaEmpieza - 1;
 
-  let resTurnos = { autorizado: true, turnos: [] };
-  try {
-    resTurnos = await obtenerTurnosMesNube();
-  } catch(e) {
-    console.warn('Aviso obteniendo turnos mes:', e);
-  }
+  const resTurnos = await obtenerTurnosMesNube();
 
-  // Si no está autorizado (el usuario no ha compartido su horario):
+  // Si no está autorizado (ej. Lucía intentando ver el calendario de Cule sin permiso):
   if (!resTurnos.autorizado) {
     calendarGrid.innerHTML = `
       <div class="bloqueo-privacidad-calendario">
         <div class="icono-candado">🔒</div>
-        <h3>Horario Protegido por Contraseña</h3>
-        <p>No tienes autorización para ver el calendario de <strong>${escapeHtml(miUsuario)}</strong>.</p>
-        <span class="subtexto-privacidad">Cada usuario tiene su horario protegido por contraseña. Puedes desbloquearlo introduciendo su clave personal o pidiéndole que te invite.</span>
-        
-        <div class="desbloqueo-pass-form-box">
-          <input type="password" id="input-desbloquear-cal-pass" placeholder="Contraseña de ${escapeHtml(miUsuario)}">
-          <button type="button" id="btn-desbloquear-cal-pass">🔑 Desbloquear Horario</button>
-        </div>
-
-        <div style="display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 15px;">
-          <button type="button" id="btn-volver-mi-cal" style="padding: 10px 18px; border-radius: 12px; cursor: pointer; font-weight: 700; background: linear-gradient(135deg, #4f46e5, #6366f1); color: #fff; border: none; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);">👤 Volver a mi calendario (${escapeHtml(usuarioLogueado || 'Mi usuario')})</button>
-          <button type="button" id="btn-pedir-compartir-cal" style="padding: 10px 18px; border-radius: 12px; cursor: pointer; font-weight: 700; background: #fff; color: #475569; border: 1.5px solid #cbd5e1;">💬 Pedir a ${escapeHtml(miUsuario)} que me comparta su horario</button>
-        </div>
+        <h3>Calendario Privado</h3>
+        <p>No tienes autorización para ver el calendario de <strong>${escapeHTML(miUsuario)}</strong>.</p>
+        <span class="subtexto-privacidad">Por políticas de seguridad y privacidad (RLS), ${escapeHTML(miUsuario)} debe otorgarte permiso explícito para que puedas ver sus turnos de trabajo.</span>
+        <button type="button" id="btn-volver-mi-cal" style="padding: 10px 18px; border-radius: 12px; cursor: pointer; font-weight: 700; background: linear-gradient(135deg, #4f46e5, #6366f1); color: #fff; border: none; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);">👤 Volver a mi calendario (${escapeHTML(usuarioLogueado || 'Mi usuario')})</button>
       </div>
     `;
-
-    const btnDesbloquear = document.getElementById('btn-desbloquear-cal-pass');
-    const inputPass = document.getElementById('input-desbloquear-cal-pass');
-    if (btnDesbloquear && inputPass) {
-      btnDesbloquear.addEventListener('click', async () => {
-        const pass = (inputPass.value || '').trim();
-        if (!pass) return alert(`Por favor, introduce la contraseña de "${miUsuario}".`);
-        if (verificarContrasenaUsuario(miUsuario, pass)) {
-          await concederPermisoCalendario(miUsuario, usuarioLogueado);
-          if (typeof confetti === 'function') confetti({ particleCount: 50, spread: 70 });
-          alert(`🎉 ¡Contraseña correcta! Horario de "${miUsuario}" desbloqueado en modo lectura.`);
-          iniciarCalendario();
-          renderizarSelectoresUsuarios();
-        } else {
-          alert(`❌ Contraseña incorrecta para "${miUsuario}". El horario permanece bloqueado.`);
-        }
-      });
-      inputPass.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') btnDesbloquear.click();
-      });
-    }
-
     const btnVolver = document.getElementById('btn-volver-mi-cal');
     if (btnVolver) {
       btnVolver.addEventListener('click', () => {
-        miUsuario = usuarioLogueado || 'Cule';
+        miUsuario = usuarioLogueado || '';
         if (selectorUsuario) selectorUsuario.value = miUsuario;
         iniciarCalendario();
-      });
-    }
-    const btnPedir = document.getElementById('btn-pedir-compartir-cal');
-    if (btnPedir) {
-      btnPedir.addEventListener('click', () => {
-        pedirCompartirHorario(miUsuario);
       });
     }
     actualizarBarraCambiosPendientes();
@@ -3114,11 +1946,7 @@ async function renderizarMes() {
 
   const datosGuardados = resTurnos.turnos || [];
   const historial = {};
-  datosGuardados.forEach(dato => {
-    if (dato && dato.dia !== undefined) {
-      historial[dato.dia] = dato.indiceEstado;
-    }
-  });
+  datosGuardados.forEach(dato => historial[dato.dia] = dato.indiceEstado);
 
   for (let i = 0; i < diaEmpieza; i++) {
     const emptyDiv = document.createElement('div');
@@ -3129,53 +1957,23 @@ async function renderizarMes() {
   for (let i = 1; i <= diasEnElMes; i++) {
     const dayCell = document.createElement('div');
     const pendiente = cambiosHorarioPendientes[i];
-    const rawIndice = pendiente !== undefined ? pendiente : (historial[i] !== undefined ? historial[i] : 0);
-    const indice = normalizarIndiceEstado(rawIndice);
-    const estadoObj = estados[indice] || estados[0];
-    const festivo = obtenerFestivoNacional(i, mes, anio);
+    let indice = pendiente !== undefined ? pendiente : (historial[i] !== undefined ? historial[i] : 0);
     
-    dayCell.className = `day ${estadoObj.clase} ${pendiente !== undefined ? 'dia-modificado-pendiente' : ''} ${festivo ? 'dia-festivo-nacional' : ''}`;
-    if (festivo) {
-      dayCell.setAttribute('data-festivo', festivo.nombre);
-      dayCell.title = `🎉 Festivo nacional: ${festivo.nombre}`;
-    }
-
-    const shiftTexto = estadoObj.texto || '';
-    const shiftHtml = shiftTexto 
-      ? `<span class="shift-label">${shiftTexto}</span>` 
-      : (festivo ? `<span class="shift-label festivo-sublabel">🎉 Festivo</span>` : `<span class="shift-label"></span>`);
-
-    dayCell.innerHTML = `
-      ${festivo ? `<span class="festivo-tag" title="🎉 Festivo: ${escapeHtml(festivo.nombre)}">🎉</span>` : ''}
-      <span class="day-number">${i}</span>
-      ${shiftHtml}
-    `;
+    dayCell.className = `day ${estados[indice].clase} ${pendiente !== undefined ? 'dia-modificado-pendiente' : ''}`;
+    dayCell.innerHTML = `<span class="day-number">${i}</span><span class="shift-label">${estados[indice].texto}</span>`;
 
     dayCell.addEventListener('click', () => {
-      if ((miUsuario || '').toLowerCase() !== (usuarioLogueado || '').toLowerCase()) {
-        return alert(`🔒 Estás viendo el horario compartido de ${miUsuario} en modo solo lectura.\nSolo ${miUsuario} puede modificar sus turnos de trabajo.`);
-      }
+      if (!esAdmin && miUsuario !== usuarioLogueado) return alert('Solo puedes editar tus turnos.');
 
-      let rawEstadoActual = cambiosHorarioPendientes[i] !== undefined 
+      let estadoActual = cambiosHorarioPendientes[i] !== undefined 
         ? cambiosHorarioPendientes[i] 
         : (historial[i] !== undefined ? historial[i] : 0);
-      let estadoActual = normalizarIndiceEstado(rawEstadoActual);
       
       let nuevoEstado = (estadoActual + 1) % estados.length;
       cambiosHorarioPendientes[i] = nuevoEstado;
-      const nuevoEstadoObj = estados[nuevoEstado] || estados[0];
 
-      const nuevoShiftTexto = nuevoEstadoObj.texto || '';
-      const nuevoShiftHtml = nuevoShiftTexto 
-        ? `<span class="shift-label">${nuevoShiftTexto}</span>` 
-        : (festivo ? `<span class="shift-label festivo-sublabel">🎉 Festivo</span>` : `<span class="shift-label"></span>`);
-
-      dayCell.className = `day ${nuevoEstadoObj.clase} ${festivo ? 'dia-festivo-nacional' : ''} dia-modificado-pendiente`;
-      dayCell.innerHTML = `
-        ${festivo ? `<span class="festivo-tag" title="🎉 Festivo: ${escapeHtml(festivo.nombre)}">🎉</span>` : ''}
-        <span class="day-number">${i}</span>
-        ${nuevoShiftHtml}
-      `;
+      dayCell.className = `day ${estados[nuevoEstado].clase} dia-modificado-pendiente`;
+      dayCell.innerHTML = `<span class="day-number">${i}</span><span class="shift-label">${estados[nuevoEstado].texto}</span>`;
 
       actualizarBarraCambiosPendientes();
     });
@@ -3183,108 +1981,31 @@ async function renderizarMes() {
     calendarGrid.appendChild(dayCell);
   }
 
-  // Actualizar tarjeta resumen de festivos nacionales de este mes
-  const contenedorFestivos = document.getElementById('festivos-mes-info');
-  if (contenedorFestivos) {
-    const festivosDelMes = [];
-    for (let d = 1; d <= diasEnElMes; d++) {
-      const f = obtenerFestivoNacional(d, mes, anio);
-      if (f) festivosDelMes.push({ dia: d, ...f });
-    }
-
-    if (festivosDelMes.length > 0) {
-      contenedorFestivos.style.display = 'block';
-      contenedorFestivos.innerHTML = `
-        <div class="festivos-mes-card">
-          <div class="festivos-mes-header">
-            <span class="festivos-icono">🎉</span>
-            <span class="festivos-titulo">Festivos en ${nombresMeses[mes]} ${anio} (${festivosDelMes.length}):</span>
-          </div>
-          <div class="festivos-mes-badges">
-            ${festivosDelMes.map(f => `
-              <div class="festivo-badge-pill" title="Festivo nacional: ${escapeHtml(f.nombre)}">
-                <span class="festivo-badge-dia">${f.dia} ${nombresMeses[mes]}</span>
-                <span class="festivo-badge-nombre">${escapeHtml(f.nombre)}</span>
-              </div>
-            `).join('')}
-          </div>
-        </div>
-      `;
-    } else {
-      contenedorFestivos.style.display = 'none';
-      contenedorFestivos.innerHTML = '';
-    }
-  }
-
   actualizarBarraCambiosPendientes();
 }
 
 async function renderizarAno() {
-  if (!vistaAnualContainer) return;
   vistaAnualContainer.innerHTML = '';
   const anio = fechaNavegacion.getFullYear();
-  if (tituloMes) tituloMes.textContent = `Año ${anio}`;
+  tituloMes.textContent = `Año ${anio}`;
 
-  let resTurnos = { autorizado: true, turnos: [] };
-  try {
-    resTurnos = await obtenerTurnosAnoNube();
-  } catch(e) {
-    console.warn('Aviso obteniendo turnos anuales:', e);
-  }
-
+  const resTurnos = await obtenerTurnosAnoNube();
   if (!resTurnos.autorizado) {
     vistaAnualContainer.innerHTML = `
       <div class="bloqueo-privacidad-calendario" style="margin: 30px auto; max-width: 500px;">
         <div class="icono-candado">🔒</div>
-        <h3>Horario Anual Protegido por Contraseña</h3>
-        <p>No tienes autorización para ver el calendario anual de <strong>${escapeHtml(miUsuario)}</strong>.</p>
-        <span class="subtexto-privacidad">Cada usuario tiene su horario protegido por contraseña. Puedes desbloquearlo introduciendo su clave personal o pidiéndole que te invite.</span>
-        
-        <div class="desbloqueo-pass-form-box">
-          <input type="password" id="input-desbloquear-cal-pass-ano" placeholder="Contraseña de ${escapeHtml(miUsuario)}">
-          <button type="button" id="btn-desbloquear-cal-pass-ano">🔑 Desbloquear Horario</button>
-        </div>
-
-        <div style="display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 15px;">
-          <button type="button" id="btn-volver-mi-cal-ano" style="padding: 10px 18px; border-radius: 12px; cursor: pointer; font-weight: 700; background: linear-gradient(135deg, #4f46e5, #6366f1); color: #fff; border: none; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);">👤 Volver a mi calendario</button>
-          <button type="button" id="btn-pedir-compartir-cal-ano" style="padding: 10px 18px; border-radius: 12px; cursor: pointer; font-weight: 700; background: #fff; color: #475569; border: 1.5px solid #cbd5e1;">💬 Pedir a ${escapeHtml(miUsuario)} que me comparta su horario</button>
-        </div>
+        <h3>Calendario Anual Privado</h3>
+        <p>No tienes autorización para ver el calendario anual de <strong>${escapeHTML(miUsuario)}</strong>.</p>
+        <span class="subtexto-privacidad">Por políticas de seguridad (RLS), necesitas permiso explícito de ${escapeHTML(miUsuario)} para consultar su cuadrante.</span>
+        <button type="button" id="btn-volver-mi-cal-ano" style="padding: 10px 18px; border-radius: 12px; cursor: pointer; font-weight: 700; background: linear-gradient(135deg, #4f46e5, #6366f1); color: #fff; border: none; box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);">👤 Volver a mi calendario</button>
       </div>
     `;
-
-    const btnDesbloquearAno = document.getElementById('btn-desbloquear-cal-pass-ano');
-    const inputPassAno = document.getElementById('input-desbloquear-cal-pass-ano');
-    if (btnDesbloquearAno && inputPassAno) {
-      btnDesbloquearAno.addEventListener('click', async () => {
-        const pass = (inputPassAno.value || '').trim();
-        if (!pass) return alert(`Por favor, introduce la contraseña de "${miUsuario}".`);
-        if (verificarContrasenaUsuario(miUsuario, pass)) {
-          await concederPermisoCalendario(miUsuario, usuarioLogueado);
-          if (typeof confetti === 'function') confetti({ particleCount: 50, spread: 70 });
-          alert(`🎉 ¡Contraseña correcta! Horario de "${miUsuario}" desbloqueado en modo lectura.`);
-          iniciarCalendario();
-          renderizarSelectoresUsuarios();
-        } else {
-          alert(`❌ Contraseña incorrecta para "${miUsuario}". El horario permanece bloqueado.`);
-        }
-      });
-      inputPassAno.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') btnDesbloquearAno.click();
-      });
-    }
-
     const btnVolver = document.getElementById('btn-volver-mi-cal-ano');
     if (btnVolver) {
       btnVolver.addEventListener('click', () => {
-        miUsuario = usuarioLogueado || 'Cule';
+        miUsuario = usuarioLogueado || '';
         if (selectorUsuario) selectorUsuario.value = miUsuario;
         iniciarCalendario();
-      });
-    }
-    const btnPedir = document.getElementById('btn-pedir-compartir-cal-ano');
-    if (btnPedir) {
-      btnPedir.addEventListener('click', () => {
-        pedirCompartirHorario(miUsuario);
       });
     }
     return;
@@ -3295,30 +2016,9 @@ async function renderizarAno() {
   for(let i=0; i<12; i++) historialAno[i] = {};
   
   datosGuardados.forEach(dato => {
-    if (dato && dato.mes_anio && dato.dia !== undefined) {
-      const parts = String(dato.mes_anio).split('-');
-      if (parts.length > 1) {
-        const m = parseInt(parts[1], 10);
-        if (!isNaN(m) && historialAno[m]) {
-          historialAno[m][dato.dia] = dato.indiceEstado;
-        }
-      }
-    }
+    const m = parseInt(dato.mes_anio.split('-')[1]);
+    historialAno[m][dato.dia] = dato.indiceEstado;
   });
-
-  // Leyenda en la vista anual
-  const leyendaAnual = document.createElement('div');
-  leyendaAnual.className = 'leyenda';
-  leyendaAnual.style.marginBottom = '15px';
-  leyendaAnual.innerHTML = `
-    <div class="leyenda-item"><span class="leyenda-color estado-libre">L</span> Libre</div>
-    <div class="leyenda-item"><span class="leyenda-color estado-manana">M</span> Mañana</div>
-    <div class="leyenda-item"><span class="leyenda-color estado-tarde">T</span> Tarde</div>
-    <div class="leyenda-item"><span class="leyenda-color estado-noche">N</span> Noche</div>
-    <div class="leyenda-item"><span class="leyenda-color estado-vacaciones">V</span> Vacaciones</div>
-    <div class="leyenda-item"><span class="leyenda-color festivo-color">★</span> Festivo nacional</div>
-  `;
-  vistaAnualContainer.appendChild(leyendaAnual);
 
   const gridAnual = document.createElement('div');
   gridAnual.className = 'vista-anual-grid';
@@ -3344,26 +2044,18 @@ async function renderizarAno() {
 
     for (let dia = 1; dia <= diasEnMes; dia++) {
       const dayCell = document.createElement('div');
-      let indice = normalizarIndiceEstado(historialAno[mes][dia]);
-      const estadoObj = estados[indice] || estados[0];
-      const festivo = obtenerFestivoNacional(dia, mes, anio);
+      let indice = historialAno[mes][dia] !== undefined ? historialAno[mes][dia] : 0;
       
-      dayCell.className = `mini-day ${estadoObj.clase} ${festivo ? 'mini-dia-festivo' : ''}`;
-      if (festivo) {
-        dayCell.title = `${dia} de ${nombresMeses[mes]}: 🎉 Festivo (${festivo.nombre})`;
-      }
+      dayCell.className = `mini-day ${estados[indice].clase}`;
       dayCell.textContent = dia;
 
       dayCell.addEventListener('click', async () => {
-        if ((miUsuario || '').toLowerCase() !== (usuarioLogueado || '').toLowerCase()) {
-          return alert(`🔒 Estás viendo el horario compartido de ${miUsuario} en modo solo lectura.\nSolo ${miUsuario} puede modificar sus turnos.`);
-        }
+        if (!esAdmin && miUsuario !== usuarioLogueado) return alert('Solo puedes editar tus turnos.');
         let nuevoIndice = (indice + 1) % estados.length;
-        const nuevoEstadoObj = estados[nuevoIndice] || estados[0];
-        const confirmacion = confirm(`¿Cambiar el día ${dia} de ${nombresMeses[mes]} a "${nuevoEstadoObj.texto || 'Vacío'}"?`);
+        const confirmacion = confirm(`¿Cambiar el día ${dia} de ${nombresMeses[mes]} a "${estados[nuevoIndice].texto || 'Vacío'}"?`);
         if (confirmacion) {
           indice = nuevoIndice;
-          dayCell.className = `mini-day ${nuevoEstadoObj.clase} ${festivo ? 'mini-dia-festivo' : ''}`;
+          dayCell.className = `mini-day ${estados[indice].clase}`;
           await guardarTurnoNube(dia, indice, `${anio}-${mes}`);
         }
       });
@@ -3389,211 +2081,44 @@ btnCoincidencias.addEventListener('click', async () => {
     return;
   }
 
-  const anio = fechaNavegacion.getFullYear();
-  const mesIndex = fechaNavegacion.getMonth();
-  const diasEnElMes = new Date(anio, mesIndex + 1, 0).getDate();
-  const startDate = `${anio}-${String(mesIndex + 1).padStart(2, '0')}-01`;
-  const endDate = `${anio}-${String(mesIndex + 1).padStart(2, '0')}-${String(diasEnElMes).padStart(2, '0')}`;
+  const mesAnio = `${fechaNavegacion.getFullYear()}-${fechaNavegacion.getMonth()}`;
+  let data = [];
 
-  let diasComunes = [];
-
-  // 1. Coincidencias seguras mediante RPC get_group_free_matches (Zero-Knowledge)
+  // El servidor solo devuelve los DÍAS LIBRES de las personas elegidas (nunca sus turnos de trabajo)
   try {
-    const { data: rpcMatches, error: rpcErr } = await supabaseApp.rpc('get_group_free_matches', {
-      p_group_name: grupoActivo,
-      p_start_date: startDate,
-      p_end_date: endDate
-    });
-
-    if (!rpcErr && Array.isArray(rpcMatches) && rpcMatches.length > 0) {
-      rpcMatches.forEach(match => {
-        const freeNames = (match.free_member_names || []).map(n => n.toLowerCase());
-        const todosLibres = seleccionados.every(sel => freeNames.includes(sel.toLowerCase()));
-        if (todosLibres) {
-          const diaNum = parseInt(match.match_date.split('-')[2], 10);
-          if (!isNaN(diaNum) && !diasComunes.includes(diaNum)) {
-            diasComunes.push(diaNum);
-          }
-        }
-      });
-    }
-  } catch (errRpc) {
-    console.warn('Aviso RPC get_group_free_matches:', errRpc);
+    const { data: filas, error } = await supabaseApp.rpc('get_free_matches', { p_usuarios: seleccionados, p_mes_anio: mesAnio });
+    if (error) throw error;
+    (filas || []).forEach(f => (f.usuarios || []).forEach(u => data.push({ dia: f.dia, usuario: u })));
+  } catch (e) {
+    console.warn('Error consultando coincidencias:', e);
+    resultadoCoincidencias.innerHTML = '⚠️ No se pudieron consultar las coincidencias. Revisa tu conexión e inténtalo de nuevo.';
+    return;
   }
 
-  // 2. Si RPC no encontró datos o trabajamos localmente, fallback con tabla Turnos y almacenamiento local
-  if (diasComunes.length === 0) {
-    const mesAnio = `${anio}-${mesIndex}`;
-    let data = [];
+  const conteo = {};
+  data.forEach(t => {
+    if (!conteo[t.dia]) conteo[t.dia] = new Set();
+    conteo[t.dia].add(t.usuario);
+  });
 
-    try {
-      let res = await supabaseApp.from('Turnos')
-        .select('*')
-        .eq('indiceEstado', 1) // Estado 1 = 'libre' (L)
-        .eq('mes_anio', mesAnio)
-        .in('usuario', seleccionados);
-
-      if (!res.error && res.data) data = res.data;
-    } catch(e) {}
-
-    // Complementar con datos locales de cada usuario seleccionado
-    seleccionados.forEach(user => {
-      const keyLocal = `kedadas_turnos_${user}_${mesAnio}`;
-      try {
-        const raw = localStorage.getItem(keyLocal);
-        if (raw) {
-          const turnosLoc = JSON.parse(raw);
-          turnosLoc.filter(t => t.indiceEstado === 1).forEach(t => {
-            if (!data.some(d => d.dia === t.dia && d.usuario === user)) {
-              data.push(t);
-            }
-          });
-        }
-      } catch(e) {}
-    });
-
-    const conteo = {};
-    data.forEach(t => {
-      if (!conteo[t.dia]) conteo[t.dia] = new Set();
-      conteo[t.dia].add(t.usuario);
-    });
-
-    for (let dia = 1; dia <= diasEnElMes; dia++) {
-      if (conteo[dia] && conteo[dia].size === seleccionados.length) {
-        diasComunes.push(dia);
-      }
+  const diasComunes = [];
+  const diasEnElMes = new Date(fechaNavegacion.getFullYear(), fechaNavegacion.getMonth() + 1, 0).getDate();
+  for (let dia = 1; dia <= diasEnElMes; dia++) {
+    if (conteo[dia] && conteo[dia].size === seleccionados.length) {
+      diasComunes.push(dia);
     }
   }
-
-  diasComunes.sort((a, b) => a - b);
 
   const nombresGrupo = seleccionados.join(', ');
   if (diasComunes.length === 0) {
-    resultadoCoincidencias.innerHTML = `😅 <strong>No hay coincidencias de días libres.</strong><br>Ningún día libráis todos a la vez (<strong>${escapeHtml(nombresGrupo)}</strong>) este mes en el grupo <strong>${escapeHtml(grupoActivo)}</strong>.`;
+    resultadoCoincidencias.innerHTML = `😅 <strong>No hay coincidencias.</strong><br>Ningún día libráis todos a la vez (<strong>${escapeHTML(nombresGrupo)}</strong>) este mes en el grupo <strong>${escapeHTML(grupoActivo)}</strong>.`;
   } else {
-    // Análisis inteligente de universitarios y lugar de quedada
-    const univsSeleccionados = seleccionados
-      .map(u => listaPerfiles.find(p => p.nombre.toLowerCase() === u.toLowerCase()))
-      .filter(p => p && p.es_universitario);
-
-    const univsFuera = univsSeleccionados.filter(p => p.ubicacion_actual === 'universidad');
-    const miembrosOrigen = seleccionados.filter(u => {
-      const p = listaPerfiles.find(item => item.nombre.toLowerCase() === u.toLowerCase());
-      return !p || !p.es_universitario || p.ubicacion_actual !== 'universidad';
-    });
-
-    let lugarRecomendado = 'Ciudad de Origen';
-    let descripcionLugar = '';
-    let planTituloSugerido = '';
-
-    if (filtroLugarQuedada === 'universidad') {
-      if (univsFuera.length > 0) {
-        const ciudadDestino = univsFuera[0].ciudad_universidad || 'la Universidad';
-        lugarRecomendado = `🎓 En ${ciudadDestino}`;
-        descripcionLugar = `🎒 <strong>¡Escapada Universitaria!</strong><br>Los miembros en origen (<strong>${escapeHtml(miembrosOrigen.join(', '))}</strong>) podéis viajar a visitar a <strong>${escapeHtml(univsFuera.map(p => p.nombre).join(', '))}</strong> en <strong>${escapeHtml(ciudadDestino)}</strong> para celebrar la quedada en su zona universitaria.`;
-        planTituloSugerido = `🎒 Escapada universitaria a ${ciudadDestino} (Día ${diasComunes[0]})`;
-      } else {
-        lugarRecomendado = `🏠 En Ciudad de Origen`;
-        descripcionLugar = `Habías seleccionado quedar en la universidad, pero actualmente todos los miembros elegidos se encuentran en su ciudad de origen. ¡Podéis quedar en los sitios de siempre!`;
-        planTituloSugerido = `🍻 Kedada en Ciudad de Origen (Día ${diasComunes[0]})`;
-      }
-    } else if (filtroLugarQuedada === 'origen') {
-      lugarRecomendado = `🏠 En Ciudad de Origen`;
-      if (univsFuera.length === 0) {
-        descripcionLugar = `✅ <strong>¡Pleno en casa!</strong><br>Todos los miembros seleccionados residen o se encuentran en su ciudad de origen. No hay desplazamientos largos necesarios.`;
-      } else {
-        descripcionLugar = `🚗 <strong>Quedada en Ciudad de Origen:</strong><br>Los universitarios que están fuera (<strong>${escapeHtml(univsFuera.map(p => `${p.nombre} en ${p.ciudad_universidad || 'Campus'}`).join(', '))}</strong>) tendrían que bajar a su ciudad de origen para reuniros todos en estas fechas.`;
-      }
-      planTituloSugerido = `🍻 Kedada en Ciudad de Origen (Día ${diasComunes[0]})`;
-    } else {
-      // 'todos' (Cualquier sitio)
-      if (univsFuera.length === 0) {
-        lugarRecomendado = `🏠 En Ciudad de Origen`;
-        descripcionLugar = `Todos los seleccionados están en su ciudad de origen. El punto de encuentro idóneo es vuestra localidad habitual.`;
-        planTituloSugerido = `🍻 Kedada en Ciudad de Origen (Día ${diasComunes[0]})`;
-      } else {
-        const ciudadDestino = univsFuera[0].ciudad_universidad || 'la Universidad';
-        lugarRecomendado = `⚖️ Origen o Visita a ${ciudadDestino}`;
-        descripcionLugar = `Hay miembros en origen (<strong>${escapeHtml(miembrosOrigen.join(', '))}</strong>) y miembros estudiando fuera (<strong>${escapeHtml(univsFuera.map(p => `${p.nombre} en ${p.ciudad_universidad || 'Campus'}`).join(', '))}</strong>).<br>Podéis acordar si bajan a origen o si el grupo sube a ${escapeHtml(ciudadDestino)} a pasar el día.`;
-        planTituloSugerido = `🎯 Votar: ¿Quedar en Origen o ir a ${ciudadDestino}?`;
-      }
-    }
-
-    const diasComunesFormateados = diasComunes.map(dia => {
-      const festivo = obtenerFestivoNacional(dia, mesIndex, anio);
-      if (festivo) {
-        return `<span class="dia-coincidencia-festivo" title="🎉 ¡Festivo nacional: ${escapeHtml(festivo.nombre)}!">${dia} (🎉 ${escapeHtml(festivo.nombre)})</span>`;
-      }
-      return `${dia}`;
-    }).join(', ');
-
-    // Análisis de ubicaciones de los miembros seleccionados
-    const infoMiembrosUbicacion = seleccionados.map(nombre => {
-      const ubi = obtenerIconoUbicacion(nombre);
-      return { nombre, ...ubi };
-    });
-
-    const ubicacionesDistintas = new Set(infoMiembrosUbicacion.map(m => m.loc)).size > 1;
-
-    let alertaUbicacionesHtml = '';
-    if (ubicacionesDistintas) {
-      alertaUbicacionesHtml = `
-        <div class="alerta-ubicaciones-distintas">
-          <div class="alerta-ubi-header">
-            <span class="alerta-ubi-icon">⚠️</span>
-            <strong>¡Atención! Estáis en ciudades distintas</strong>
-          </div>
-          <p class="alerta-ubi-desc">
-            Tenéis días libres en común, pero <strong>no todos os encontráis en el mismo sitio</strong> este mes:
-          </p>
-          <ul class="alerta-ubi-lista">
-            ${infoMiembrosUbicacion.map(m => `
-              <li><strong>${escapeHtml(m.nombre)}:</strong> <span class="badge-ubi-pill ${m.pillClass}">${m.icon} ${escapeHtml(m.text)}</span></li>
-            `).join('')}
-          </ul>
-          <div class="alerta-ubi-consejo">
-            💡 <strong>Consejo para quedar:</strong> Coordinad si los desplazados bajan a la ciudad de origen o si el resto organiza una visita a su ciudad de estudio/trabajo.
-          </div>
-        </div>
-      `;
-    } else {
-      const ubiComun = infoMiembrosUbicacion[0] || { text: 'En Origen', icon: '🏠' };
-      alertaUbicacionesHtml = `
-        <div class="alerta-ubicaciones-distintas" style="background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%); border-color: #bbf7d0;">
-          <div class="alerta-ubi-header" style="color: #166534;">
-            <span>✅</span>
-            <strong>¡Ubicaciones 100% alineadas!</strong>
-          </div>
-          <p class="alerta-ubi-desc" style="color: #15803d; margin: 0;">
-            Todos los miembros seleccionados os encontráis en <strong>${escapeHtml(ubiComun.text)}</strong> (${ubiComun.icon}). ¡No hay barreras geográficas para celebrar la kedada!
-          </p>
-        </div>
-      `;
-    }
-
     resultadoCoincidencias.innerHTML = `
-      <div style="font-size: 1.05rem; font-weight: 800; color: #065f46; margin-bottom: 6px;">
-        🎉 ¡Días libres en común en ${escapeHtml(grupoActivo)}!
-      </div>
-      <div style="font-size: 0.92rem; color: #1e293b; margin-bottom: 8px;">
-        Coincidís libres (<strong>${escapeHtml(nombresGrupo)}</strong>) los días: 
-        <strong style="font-size: 1.12rem; color: #4f46e5;">${diasComunesFormateados}</strong> de ${nombresMeses[fechaNavegacion.getMonth()]}
-      </div>
-
-      <!-- Alerta Inteligente de Ubicación -->
-      ${alertaUbicacionesHtml}
-      
-      <!-- Tarjeta de Punto de Encuentro y Universitarios -->
-      <div class="recom-quedada-box">
-        <div class="recom-quedada-header">
-          <span class="recom-quedada-title">📍 Punto de Encuentro Recomendado</span>
-          <span class="recom-quedada-lugar-badge">${escapeHtml(lugarRecomendado)}</span>
-        </div>
-        <div class="recom-quedada-desc">${descripcionLugar}</div>
-        <button type="button" class="btn-proponer-plan-kdd" onclick="proponerPlanDesdeCoincidencia('${planTituloSugerido.replace(/'/g, "\\'")}')">
-          🎯 Crear propuesta en Votaciones del Grupo ➔
-        </button>
-      </div>
+      🎉 <strong>¡Días libres en común en ${escapeHTML(grupoActivo)}!</strong><br>
+      Coincidís (<strong>${escapeHTML(nombresGrupo)}</strong>) los días: <strong>${diasComunes.join(', ')}</strong> de ${nombresMeses[fechaNavegacion.getMonth()]}<br>
+      <button type="button" class="btn-sec-primario-sm btn-destacado-guardar" style="margin-top: 10px; cursor: pointer;" onclick="document.querySelector('[data-tab=planes]').click()">
+        🎯 Ver planes y votar qué hacer ➔
+      </button>
     `;
     
     const duration = 3 * 1000;
@@ -3803,12 +2328,12 @@ btnSecConfirmar.addEventListener('click', async () => {
   btnSecConfirmar.textContent = '⏳ Guardando turnos...';
 
   try {
-    const loteSize = 25;
-    for (let i = 0; i < cambiosPendientes.length; i += loteSize) {
-      const lote = cambiosPendientes.slice(i, i + loteSize);
-      await Promise.all(lote.map(item => guardarTurnoNube(item.dia, item.indiceEstado, item.mes_anio)));
-      btnSecConfirmar.textContent = `⏳ Guardando (${Math.min(i + loteSize, cambiosPendientes.length)}/${cambiosPendientes.length})...`;
+    for (const item of cambiosPendientes) {
+      await guardarTurnoNube(item.dia, item.indiceEstado, item.mes_anio, false);
     }
+    btnSecConfirmar.textContent = '⏳ Sincronizando...';
+    const okLote = await guardarTurnosEnLote(cambiosPendientes.map(c => ({ dia: c.dia, usuario: miUsuario, indiceEstado: c.indiceEstado, mes_anio: c.mes_anio })));
+    if (!okLote) throw new Error('No se pudo sincronizar con el servidor; los turnos quedan guardados en este dispositivo.');
 
     modalSecuencia.style.display = 'none';
     await iniciarCalendario();
@@ -3830,26 +2355,26 @@ const btnGuardarNuevoPlan = document.getElementById('btn-guardar-nuevo-plan');
 
 const PLANES_DEFECTO_POR_GRUPO = {
   'Amigos': [
-    { id: 'plan-amg-1', opcion: '🍻 Salir de cañas y tapas', votantes: ['Cule'], grupo: 'Amigos' },
+    { id: 'plan-amg-1', opcion: '🍻 Salir de cañas y tapas', votantes: [], grupo: 'Amigos' },
     { id: 'plan-amg-2', opcion: '🍕 Cena y juegos de mesa', votantes: [], grupo: 'Amigos' },
     { id: 'plan-amg-3', opcion: '🎾 Partido de pádel', votantes: [], grupo: 'Amigos' },
     { id: 'plan-amg-4', opcion: '🍖 Barbacoa de fin de semana', votantes: [], grupo: 'Amigos' },
     { id: 'plan-amg-5', opcion: '🎬 Ir al cine y cenar hamburguesas', votantes: [], grupo: 'Amigos' }
   ],
   'Familia': [
-    { id: 'plan-fam-1', opcion: '🥘 Comida familiar de domingo', votantes: ['Cule'], grupo: 'Familia' },
+    { id: 'plan-fam-1', opcion: '🥘 Comida familiar de domingo', votantes: [], grupo: 'Familia' },
     { id: 'plan-fam-2', opcion: '☕ Merienda y juegos con abuelos y tíos', votantes: [], grupo: 'Familia' },
     { id: 'plan-fam-3', opcion: '🌲 Excursión a la sierra o parque campestre', votantes: [], grupo: 'Familia' },
     { id: 'plan-fam-4', opcion: '🎂 Celebrar cumpleaños o aniversario familiar', votantes: [], grupo: 'Familia' }
   ],
   'Pareja': [
-    { id: 'plan-par-1', opcion: '🍷 Cena romántica a la luz de las velas', votantes: ['Cule'], grupo: 'Pareja' },
+    { id: 'plan-par-1', opcion: '🍷 Cena romántica a la luz de las velas', votantes: [], grupo: 'Pareja' },
     { id: 'plan-par-2', opcion: '🧖 Escapada fin de semana / Circuito Spa', votantes: [], grupo: 'Pareja' },
     { id: 'plan-par-3', opcion: '🍿 Maratón de peli, mantita y cena en casa', votantes: [], grupo: 'Pareja' },
     { id: 'plan-par-4', opcion: '🚶 Paseo al atardecer y helado artesano', votantes: [], grupo: 'Pareja' }
   ],
   'Hijos': [
-    { id: 'plan-hij-1', opcion: '🎡 Parque de atracciones o acuático', votantes: ['Cule'], grupo: 'Hijos' },
+    { id: 'plan-hij-1', opcion: '🎡 Parque de atracciones o acuático', votantes: [], grupo: 'Hijos' },
     { id: 'plan-hij-2', opcion: '🍔 Tarde de hamburguesas y cine de estreno', votantes: [], grupo: 'Hijos' },
     { id: 'plan-hij-3', opcion: '🚲 Ruta en bicicleta o patines por el río', votantes: [], grupo: 'Hijos' },
     { id: 'plan-hij-4', opcion: '⚽ Tarde de fútbol y juegos en el parque', votantes: [], grupo: 'Hijos' }
@@ -3878,7 +2403,7 @@ function cargarPlanesDesdeStorage() {
   } catch (e) {}
 
   const base = PLANES_DEFECTO_POR_GRUPO[grupoActivo] || [
-    { id: `plan-${Date.now()}-1`, opcion: '🎉 Kedada especial', votantes: ['Cule'], grupo: grupoActivo },
+    { id: `plan-${Date.now()}-1`, opcion: '🎉 Kedada especial', votantes: [], grupo: grupoActivo },
     { id: `plan-${Date.now()}-2`, opcion: '🍽️ Comida o cena juntos', votantes: [], grupo: grupoActivo }
   ];
   return JSON.parse(JSON.stringify(base));
@@ -3900,7 +2425,7 @@ function pintarPlanesEnPantalla() {
     return votosB - votosA;
   });
 
-  const usuarioActual = usuarioLogueado || miUsuario || 'Cule';
+  const usuarioActual = usuarioLogueado || miUsuario || '';
 
   ordenados.forEach(item => {
     const votantes = Array.isArray(item.votantes) ? item.votantes : [];
@@ -3912,14 +2437,14 @@ function pintarPlanesEnPantalla() {
     
     div.innerHTML = `
       <div class="opcion-header-row">
-        <span class="opcion-texto">${escapeHtml(item.opcion)}</span>
+        <span class="opcion-texto">${escapeHTML(item.opcion)}</span>
         <div class="plan-acciones-btns">
           <button type="button" class="btn-accion-plan btn-editar-plan" title="Editar plan">✏️</button>
           <button type="button" class="btn-accion-plan btn-borrar-plan" title="Eliminar plan">🗑️</button>
         </div>
       </div>
       <div class="opcion-bar">
-        <span class="votantes-lista">${numVotos > 0 ? votantes.map(v => escapeHtml(v)).join(', ') : 'Sin votos aún (toca para votar)'}</span>
+        <span class="votantes-lista">${numVotos > 0 ? escapeHTML(votantes.join(', ')) : 'Sin votos aún (toca para votar)'}</span>
         <span class="voto-badge">${numVotos} ${numVotos === 1 ? 'voto' : 'votos'}</span>
       </div>
     `;
@@ -4004,13 +2529,9 @@ async function cargarVotaciones() {
 
   // 2. Sincronizar con Supabase en segundo plano
   try {
-    let query = supabaseApp.from('votaciones').select('*').eq('grupo', grupoActivo);
-    let { data, error } = await query;
-    if (error && error.message && error.message.includes('grupo')) {
-      const res = await supabaseApp.from('votaciones').select('*');
-      data = res.data;
-      error = res.error;
-    }
+    const gid = grupoActivoId();
+    if (!gid) return;
+    let { data, error } = await supabaseApp.from('votaciones').select('*').eq('group_id', gid);
 
     if (!error && data && Array.isArray(data) && data.length > 0) {
       data.forEach(dbItem => {
@@ -4059,7 +2580,7 @@ async function guardarNuevoPlan() {
     return;
   }
 
-  const usuarioActual = usuarioLogueado || miUsuario || 'Cule';
+  const usuarioActual = usuarioLogueado || miUsuario || '';
   const nuevoPlan = {
     id: `plan-${Date.now()}`,
     opcion: texto,
@@ -4079,15 +2600,10 @@ async function guardarNuevoPlan() {
     const res = await supabaseApp.from('votaciones').insert({
       opcion: texto,
       votantes: JSON.stringify([usuarioActual]),
-      grupo: grupoActivo
+      group_id: grupoActivoId()
     }).select();
 
-    if (res.error && res.error.message && res.error.message.includes('grupo')) {
-      await supabaseApp.from('votaciones').insert({
-        opcion: texto,
-        votantes: JSON.stringify([usuarioActual])
-      });
-    } else if (!res.error && res.data && res.data[0]) {
+    if (!res.error && res.data && res.data[0]) {
       nuevoPlan.id = res.data[0].id;
       guardarPlanesLocales();
     }
@@ -4168,17 +2684,15 @@ function pintarMensaje(msg) {
 
   const horaDisplay = msg.hora || (msg.created_at ? new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '');
   
-  const ubi = obtenerIconoUbicacion(msg.usuario);
-
   div.innerHTML = `
     <div class="mensaje-contenido">
       <div style="display: flex; justify-content: space-between; gap: 8px; font-size: 0.75rem; margin-bottom: 2px; opacity: 0.85;">
-        <strong>${esMio ? 'Tú' : escapeHtml(msg.usuario)} <span class="chat-avatar-ubi" title="${escapeHtml(ubi.title)}">${ubi.icon}</span></strong>
-        ${horaDisplay ? `<span>${escapeHtml(horaDisplay)}</span>` : ''}
+        <strong>${esMio ? 'Tú' : escapeHTML(msg.usuario)}</strong>
+        ${horaDisplay ? `<span>${escapeHTML(horaDisplay)}</span>` : ''}
       </div>
-      <div>${escapeHtml(msg.texto)}</div>
+      <div>${escapeHTML(msg.texto)}</div>
     </div>
-    <button class="btn-borrar-msg" title="Borrar mensaje" data-id="${escapeHtml(msg.id)}">🗑️</button>
+    <button class="btn-borrar-msg" title="Borrar mensaje" data-id="${escapeHTML(msg.id)}">🗑️</button>
   `;
 
   const btnBorrar = div.querySelector('.btn-borrar-msg');
@@ -4206,7 +2720,7 @@ function pintarTodosLosMensajes() {
 
 async function cargarChatInicial() {
   if (chatTituloGrupo) {
-    const grupoObj = (listaGrupos || []).find(g => obtenerNombreGrupo(g).toLowerCase() === (grupoActivo || '').toLowerCase());
+    const grupoObj = listaGrupos.find(g => g.nombre.toLowerCase() === grupoActivo.toLowerCase());
     chatTituloGrupo.textContent = `💬 Tablón de Avisos (${grupoObj?.icono || '👥'} ${grupoActivo})`;
   }
 
@@ -4216,13 +2730,9 @@ async function cargarChatInicial() {
 
   // 2. Sincronizar con Supabase en segundo plano
   try {
-    let query = supabaseApp.from('mensajes').select('*').eq('grupo', grupoActivo).order('created_at', { ascending: true });
-    let { data, error } = await query;
-    if (error && error.message && error.message.includes('grupo')) {
-      const res = await supabaseApp.from('mensajes').select('*').order('created_at', { ascending: true });
-      data = res.data;
-      error = res.error;
-    }
+    const gid = grupoActivoId();
+    if (!gid) return;
+    let { data, error } = await supabaseApp.from('mensajes').select('*').eq('group_id', gid).order('created_at', { ascending: true });
 
     if (!error && data && Array.isArray(data) && data.length > 0) {
       data.forEach(dbMsg => {
@@ -4246,7 +2756,7 @@ async function enviarMensaje() {
   chatInput.value = '';
   const ahora = new Date();
   const horaActual = ahora.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  const usuarioActual = usuarioLogueado || miUsuario || 'Cule';
+  const usuarioActual = usuarioLogueado || miUsuario || '';
 
   const nuevoMsg = {
     id: `msg-${Date.now()}`,
@@ -4267,15 +2777,10 @@ async function enviarMensaje() {
     const res = await supabaseApp.from('mensajes').insert({
       usuario: usuarioActual,
       texto: texto,
-      grupo: grupoActivo
+      group_id: grupoActivoId()
     }).select();
 
-    if (res.error && res.error.message && res.error.message.includes('grupo')) {
-      await supabaseApp.from('mensajes').insert({
-        usuario: usuarioActual,
-        texto: texto
-      });
-    } else if (!res.error && res.data && res.data[0]) {
+    if (!res.error && res.data && res.data[0]) {
       nuevoMsg.id = res.data[0].id;
       guardarChatLocales();
     }
@@ -4322,10 +2827,7 @@ if (selectorTema) {
 }
 
 function aplicarTema(tema) {
-  if (!document.body) return;
-  const prefiereOscuro = (window.matchMedia && typeof window.matchMedia === 'function')
-    ? window.matchMedia('(prefers-color-scheme: dark)').matches
-    : false;
+  const prefiereOscuro = window.matchMedia('(prefers-color-scheme: dark)').matches;
   if (tema === 'dark' || (tema === 'auto' && prefiereOscuro)) document.body.classList.add('dark-theme');
   else document.body.classList.remove('dark-theme');
 }
@@ -4347,107 +2849,82 @@ if ('serviceWorker' in navigator) {
 }
 
 const VAPID_PUBLIC_KEY = 'BPFV66ewMSEPBptLh0be-rpRSnEc01H4_HoFHxglPYyCb6Bequ7WFeqUhqMzMcB7PBninBqx4gBbrEyq1R1jxvI';
+let pushListenersListo = false;
 
-function urlBase64ToUint8Array(base64String) {
-  const padding = '='.repeat((4 - base64String.length % 4) % 4);
-  const base64 = (base64String + padding)
-    .replace(/\-/g, '+')
-    .replace(/_/g, '/');
-  const rawData = window.atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-  for (let i = 0; i < rawData.length; ++i) {
-    outputArray[i] = rawData.charCodeAt(i);
-  }
-  return outputArray;
+function urlBase64ToUint8Array(base64) {
+  const padding = '='.repeat((4 - (base64.length % 4)) % 4);
+  const raw = atob((base64 + padding).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
 }
 
-async function suscribirWebPushDispositivo() {
-  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return null;
-
+async function suscribirPush() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    alert('Este dispositivo no admite notificaciones push. En iPhone, añade primero la app a la pantalla de inicio.');
+    return false;
+  }
+  if (VAPID_PUBLIC_KEY.startsWith('PEGA_')) {
+    console.warn('Falta configurar VAPID_PUBLIC_KEY en app.js');
+    return false;
+  }
   try {
     const reg = await navigator.serviceWorker.ready;
     let sub = await reg.pushManager.getSubscription();
-
     if (!sub) {
-      sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
-      });
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) });
     }
-
-    if (sub) {
-      const subJson = sub.toJSON();
-      const p256dh = subJson.keys?.p256dh;
-      const auth = subJson.keys?.auth;
-
-      if (miUserId && p256dh && auth) {
-        await supabaseApp.from('push_subscriptions').upsert({
-          user_id: miUserId,
-          endpoint: sub.endpoint,
-          p256dh: p256dh,
-          auth: auth
-        }, { onConflict: 'endpoint' });
-      }
-
-      return sub;
-    }
-  } catch (err) {
-    console.warn('Aviso suscribiendo a Web Push:', err);
+    const j = sub.toJSON();
+    const { data: { session } } = await supabaseApp.auth.getSession();
+    if (!session) return false;
+    const { error } = await supabaseApp.from('push_subscriptions').upsert(
+      { user_id: session.user.id, endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth },
+      { onConflict: 'endpoint' }
+    );
+    if (error) throw error;
+    return true;
+  } catch (e) {
+    console.warn('No se pudo suscribir a push:', e);
+    return false;
   }
-  return null;
 }
 
-async function enviarAvisoPushServidor(titulo, mensaje, url = '/') {
+// Avisa al servidor para que notifique a las personas con las que ahora coincides
+async function notificarCoincidencias(mesAnio) {
   try {
-    await fetch('/api/send-push', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title: titulo,
-        body: mensaje,
-        url: url
-      })
-    });
-  } catch(e) {
-    console.warn('Aviso enviando push al servidor:', e);
-  }
+    const con = Array.from(usuariosSeleccionadosCoincidencias).filter(u => u.toLowerCase() !== (miUsuario || '').toLowerCase());
+    if (con.length === 0) return;
+    const headers = await cabecerasAuth();
+    if (!headers.Authorization) return;
+    await fetch('/api/notify-matches', { method: 'POST', headers, body: JSON.stringify({ con, mesAnio }) });
+  } catch (e) { /* los avisos nunca deben romper el guardado */ }
 }
 
 async function inicializarPushNotifications() {
   if (!('Notification' in window)) return;
+  if (Notification.permission === 'granted') {
+    suscribirPush();
+  }
+  if (!btnNotificaciones) return;
+  if (Notification.permission === 'granted') {
+    btnNotificaciones.textContent = '🔔 Avisos Activos';
+    btnNotificaciones.classList.add('activo');
+  }
+  if (pushListenersListo) return;
+  pushListenersListo = true;
 
-  if (btnNotificaciones) {
-    if (Notification.permission === 'granted') {
+  btnNotificaciones.addEventListener('click', async () => {
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') {
+        return alert('Para recibir alertas de días libres, permite las notificaciones en los ajustes de tu navegador o iPhone.');
+      }
+      const ok = await suscribirPush();
       btnNotificaciones.textContent = '🔔 Avisos Activos';
       btnNotificaciones.classList.add('activo');
-      suscribirWebPushDispositivo();
+      alert(ok ? '🎉 ¡Notificaciones activadas! Te avisaremos cuando coincidas en días libres.' : '⚠️ Permiso concedido, pero el servidor de avisos aún no está configurado.');
+    } catch (e) {
+      console.error(e);
     }
-
-    btnNotificaciones.addEventListener('click', async () => {
-      try {
-        const permission = await Notification.requestPermission();
-        if (permission === 'granted') {
-          btnNotificaciones.textContent = '🔔 Avisos Activos';
-          btnNotificaciones.classList.add('activo');
-
-          const sub = await suscribirWebPushDispositivo();
-          if (sub) {
-            alert('🎉 ¡Notificaciones Web Push activadas! Tu dispositivo ha sido registrado para avisarte al instante de coincidencias y planes.');
-            await enviarAvisoPushServidor(
-              'Kedadas',
-              `🔔 ¡Notificaciones activadas con éxito para ${usuarioLogueado || 'tu cuenta'}!`
-            );
-          } else {
-            alert('🎉 ¡Notificaciones activadas en el navegador!');
-          }
-        } else {
-          alert('Para recibir alertas de días libres, necesitas permitir las notificaciones en los ajustes de tu navegador o iPhone.');
-        }
-      } catch (e) {
-        console.error(e);
-      }
-    });
-  }
+  });
 }
 
 // =========================================================================
@@ -4495,169 +2972,12 @@ const scanDiasGrid = document.getElementById('scan-dias-grid');
 const btnAnalizarFoto = document.getElementById('btn-analizar-foto');
 const btnGuardarScan = document.getElementById('btn-guardar-scan');
 
-const STORAGE_GEMINI_KEY = 'kedadas_gemini_api_key';
+try { localStorage.removeItem('kedadas_gemini_api_key'); } catch (e) {}
 let imagenBase64Actual = '';
 let mimeTypeActual = 'image/jpeg';
 let nombreArchivoActual = '';
 let resultadoScanGlobal = null; // { modo: 'mes'|'ano', anio: 2026, meses: [ { mes: 0, nombreMes: 'Enero', dias: [] } ] }
 let mesActivoEnRevision = 0;
-
-// Configuración de la clave de Gemini
-function actualizarEstadoClaveGemini() {
-  const claveGuardada = (localStorage.getItem(STORAGE_GEMINI_KEY) || '').trim();
-  if (statusGeminiKey) {
-    if (claveGuardada) {
-      statusGeminiKey.textContent = '✅ Clave de IA configurada';
-      statusGeminiKey.className = 'status-gemini-key activo';
-      if (inputGeminiKey) inputGeminiKey.value = claveGuardada;
-    } else {
-      statusGeminiKey.textContent = 'ℹ️ Sin clave propia (usando Vercel/servidor)';
-      statusGeminiKey.className = 'status-gemini-key inactivo';
-    }
-  }
-}
-
-if (btnToggleConfigIA) {
-  btnToggleConfigIA.addEventListener('click', () => {
-    if (!boxConfigIA) return;
-    const estaVisible = boxConfigIA.style.display !== 'none';
-    boxConfigIA.style.display = estaVisible ? 'none' : 'block';
-    if (!estaVisible && inputGeminiKey) {
-      inputGeminiKey.focus();
-    }
-  });
-}
-
-if (btnToggleEyeGemini && inputGeminiKey) {
-  btnToggleEyeGemini.addEventListener('click', () => {
-    inputGeminiKey.type = inputGeminiKey.type === 'password' ? 'text' : 'password';
-  });
-}
-
-if (btnGuardarGeminiKey && inputGeminiKey) {
-  btnGuardarGeminiKey.addEventListener('click', () => {
-    const val = inputGeminiKey.value.trim();
-    if (val) {
-      localStorage.setItem(STORAGE_GEMINI_KEY, val);
-      actualizarEstadoClaveGemini();
-      alert('✅ ¡Clave de Google Gemini guardada con éxito! Ya puedes analizar tus fotos y PDFs.');
-      if (boxConfigIA) boxConfigIA.style.display = 'none';
-    } else {
-      localStorage.removeItem(STORAGE_GEMINI_KEY);
-      actualizarEstadoClaveGemini();
-      alert('ℹ️ Clave eliminada. Se usará el servidor o modo interactivo.');
-    }
-  });
-}
-
-// Detectar y listar dinámicamente los modelos de Gemini disponibles para la clave del usuario
-async function obtenerModelosGeminiDisponibles(apiKey) {
-  const cleanKey = (apiKey || '').trim();
-  const preferencia = [
-    'gemini-2.0-flash',
-    'gemini-1.5-flash-latest',
-    'gemini-1.5-flash-002',
-    'gemini-1.5-flash',
-    'gemini-2.5-flash',
-    'gemini-1.5-pro',
-    'gemini-pro'
-  ];
-
-  if (!cleanKey) return preferencia;
-
-  try {
-    // Consultar ModelService.ListModels para averiguar exactamente qué modelos admite la clave
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${cleanKey}`);
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data.models) && data.models.length > 0) {
-        const disponibles = data.models
-          .filter(m => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent'))
-          .map(m => m.name.replace(/^models\//, ''));
-
-        if (disponibles.length > 0) {
-          const ordenados = [];
-          for (const pref of preferencia) {
-            const encontrado = disponibles.find(d => d === pref || d.startsWith(pref));
-            if (encontrado && !ordenados.includes(encontrado)) {
-              ordenados.push(encontrado);
-            }
-          }
-          for (const d of disponibles) {
-            if (!ordenados.includes(d)) {
-              ordenados.push(d);
-            }
-          }
-          return ordenados;
-        }
-      }
-    }
-  } catch (e) {
-    console.warn('Consulta dynamic ListModels falló, usando lista predeterminada:', e);
-  }
-
-  return preferencia;
-}
-
-// Botón para probar la validez de la clave Gemini al instante con auto-detección
-const btnProbarGeminiKey = document.getElementById('btn-probar-gemini-key');
-if (btnProbarGeminiKey && inputGeminiKey) {
-  btnProbarGeminiKey.addEventListener('click', async () => {
-    const clave = (inputGeminiKey.value || localStorage.getItem(STORAGE_GEMINI_KEY) || '').trim();
-    if (!clave) {
-      return alert('Pega primero tu clave de Google Gemini para probarla.');
-    }
-    btnProbarGeminiKey.textContent = '⏳ Probando...';
-    try {
-      const modelos = await obtenerModelosGeminiDisponibles(clave);
-      let exito = false;
-      let modeloFuncional = '';
-      let ultimoError = '';
-
-      for (const modelo of modelos) {
-        const versiones = ['v1beta', 'v1'];
-        for (const vApi of versiones) {
-          try {
-            const url = `https://generativelanguage.googleapis.com/${vApi}/models/${modelo}:generateContent?key=${clave}`;
-            const res = await fetch(url, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                contents: [{ parts: [{ text: 'Di únicamente: OK' }] }]
-              })
-            });
-            const data = await res.json();
-            if (res.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
-              exito = true;
-              modeloFuncional = `${modelo} (${vApi})`;
-              break;
-            } else {
-              ultimoError = data.error?.message || (data.error ? JSON.stringify(data.error) : 'Respuesta desconocida de Google');
-              if (res.status === 404) break; // Probar siguiente modelo si este no existe en este endpoint
-            }
-          } catch (e) {
-            ultimoError = e.message;
-          }
-        }
-        if (exito) break;
-      }
-
-      btnProbarGeminiKey.textContent = '🧪 Probar';
-
-      if (exito) {
-        localStorage.setItem(STORAGE_GEMINI_KEY, clave);
-        actualizarEstadoClaveGemini();
-        if (typeof confetti === 'function') confetti({ particleCount: 35, spread: 60 });
-        alert(`🎉 ¡Tu clave de Google Gemini es 100% VÁLIDA y funciona a la perfección!\n\nModelo activo detectado: ${modeloFuncional}\nYa está guardada para todos tus escaneos automáticos.`);
-      } else {
-        alert(`❌ La clave de Gemini no funcionó.\n\nMotivo exacto devuelto por Google:\n${ultimoError}\n\nAsegúrate de copiar la clave entera de aistudio.google.com/app/apikey.`);
-      }
-    } catch (e) {
-      btnProbarGeminiKey.textContent = '🧪 Probar';
-      alert(`❌ Error de conexión al probar la clave:\n${e.message}\n\nComprueba tu conexión a internet o si hay algún bloqueador de red.`);
-    }
-  });
-}
 
 // Inicializar selectores de mes, año y personas en el modal de escaneo
 function poblarSelectoresScan() {
@@ -4687,7 +3007,6 @@ function poblarSelectoresScan() {
     });
   }
 
-  actualizarEstadoClaveGemini();
 }
 
 // Selector de modo de escaneo (auto, mes, ano)
@@ -4887,106 +3206,7 @@ function procesarArchivoImagen(file) {
   reader.readAsDataURL(file);
 }
 
-// LLAMADA DIRECTA A GEMINI VISION DESDE EL NAVEGADOR
-async function llamarGeminiVisionNavegador(apiKey, base64, mimeType, modo, usuario, mes, anio) {
-  const cleanKey = (apiKey || '').trim().replace(/^['"]|['"]$/g, '');
-  const cleanBase64 = base64.replace(/^data:[^;]+;base64,/, '');
-  const mesNombre = (mes !== null && mes !== undefined) ? nombresMeses[mes] : '';
-
-  const prompt = `
-Eres un digitalizador experto en cuadrantes de turnos laborales (sanidad, policía, emergencias, fábricas, bomberos, hostelería, etc.).
-Tu misión es extraer con total exactitud todos los turnos del trabajador/cuadrante en la imagen o documento PDF.
-
-CONTEXTO DE BÚSQUEDA:
-- Trabajador a extraer: "${usuario}". Si hay múltiples filas con nombres de personas, busca EXCLUSIVAMENTE la fila correspondiente a "${usuario}". Si no encuentras ese nombre específico o la tabla es para un solo trabajador/puesto, extrae el cuadrante principal visible.
-- Año de referencia: ${anio}.
-- Mes de referencia si aplica: ${mes !== null && mes !== undefined ? `${mes + 1} (${mesNombre})` : 'Detectar del documento'}.
-- Modo solicitado: "${modo}" (si es 'auto', analiza si el documento contiene solo 1 mes o el año completo/múltiples meses).
-
-CONVENCIÓN DE TURNOS PERMITIDOS:
-- "M": Turno de Mañana (ejemplos: M, M1, M2, 07:00-15:00, 08:00-15:00, Mañana).
-- "T": Turno de Tarde (ejemplos: T, T1, T2, 15:00-23:00, 14:00-22:00, Tarde).
-- "N": Turno de Noche (ejemplos: N, N1, 23:00-07:00, 22:00-06:00, Noche, Guardia noche).
-- "L": Día Libre / Descanso / Saliente (ejemplos: L, D, S, Saliente, Libre, Descanso, Festivo libre).
-- "V": Vacaciones / Permiso (ejemplos: V, VAC, AP, Asuntos propios, Permiso, Baja).
-- "X": Vacío o sin turno asignado.
-
-REGLAS DE FORMATO Y FECHAS:
-1. El campo "mes" DEBE ser un número entero de 0 a 11 (donde 0 = Enero, 1 = Febrero, ..., 11 = Diciembre).
-2. El campo "dia" DEBE ser el número del día (1 al 28/29/30/31 según el mes).
-3. Asegúrate de incluir todos los días del mes o de los meses presentes en el cuadrante.
-
-FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO NI MARKDOWN):
-{
-  "modo": "mes" o "ano",
-  "anio": ${anio},
-  "resumen": "Cuadrante detectado para ${usuario}...",
-  "meses": [
-    {
-      "mes": 0,
-      "nombreMes": "Enero",
-      "dias": [
-        { "dia": 1, "turno": "M" },
-        { "dia": 2, "turno": "T" },
-        { "dia": 3, "turno": "L" }
-      ]
-    }
-  ]
-}
-`;
-
-  // Obtener lista inteligente de modelos compatibles con generateContent
-  let modelos = await obtenerModelosGeminiDisponibles(cleanKey);
-  if (!modelos || modelos.length === 0) {
-    modelos = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash-002', 'gemini-1.5-flash', 'gemini-2.5-flash', 'gemini-1.5-pro'];
-  }
-  let ultimoError = null;
-
-  for (const modelo of modelos) {
-    const versionesApi = ['v1beta', 'v1'];
-    for (const vApi of versionesApi) {
-      try {
-        const url = `https://generativelanguage.googleapis.com/${vApi}/models/${modelo}:generateContent?key=${cleanKey}`;
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{
-              parts: [
-                { text: prompt },
-                { inline_data: { mime_type: mimeType || 'image/jpeg', data: cleanBase64 } }
-              ]
-            }],
-            generationConfig: {
-              response_mime_type: 'application/json',
-              temperature: 0.1,
-              max_output_tokens: 8192
-            }
-          })
-        });
-
-        const data = await res.json();
-        if (res.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
-          const rawJson = data.candidates[0].content.parts[0].text;
-          const parsed = JSON.parse(rawJson);
-          if (parsed && Array.isArray(parsed.meses) && parsed.meses.length > 0) {
-            console.log(`✅ Cuadrante analizado con éxito usando modelo ${modelo} (${vApi})`);
-            return parsed;
-          }
-        } else {
-          ultimoError = data.error?.message || (data.error ? JSON.stringify(data.error) : `Error ${res.status}`);
-          if (res.status === 404) break; // Probar siguiente modelo
-        }
-      } catch (e) {
-        ultimoError = e.message;
-      }
-    }
-  }
-
-  throw new Error(ultimoError || 'No se pudo contactar con los modelos de Gemini Vision.');
-}
-
-// Analizar la foto o archivo con IA y rellenar automáticamente el calendario vía función serverless
+// Analizar la foto o archivo con IA y rellenar automáticamente el calendario
 if (btnAnalizarFoto) {
   btnAnalizarFoto.addEventListener('click', async () => {
     if (!imagenBase64Actual) {
@@ -4998,43 +3218,34 @@ if (btnAnalizarFoto) {
     const anoSeleccionado = parseInt(scanAnoObjetivo.value) || fechaNavegacion.getFullYear();
     const usuarioObjetivo = scanUsuarioObjetivo ? scanUsuarioObjetivo.value : miUsuario;
 
-    let claveGeminiLocal = (localStorage.getItem(STORAGE_GEMINI_KEY) || '').trim();
-
     btnAnalizarFoto.style.display = 'none';
     scanLoadingState.style.display = 'block';
     scanStatusText.textContent = 'Analizando cuadrante con IA de Visión...';
-    scanStatusSub.textContent = 'Enviando cuadrante a la función serverless...';
+    scanStatusSub.textContent = `Extrayendo turnos para ${usuarioObjetivo}...`;
 
     let resultado = null;
     let ultimoErrorDetalle = '';
 
-    // LLAMADA EXCLUSIVA A LA FUNCIÓN SERVERLESS (/api/analizar-cuadrante)
+    // La clave de Gemini vive en el servidor (Vercel); el navegador solo envía la imagen con tu sesión
     try {
-      scanStatusSub.textContent = `Extrayendo turnos para ${usuarioObjetivo} con Gemini Vision...`;
+      const headers = await cabecerasAuth();
       const resServidor = await fetch('/api/analizar-cuadrante', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           imageBase64: imagenBase64Actual,
           mimeType: mimeTypeActual,
           mes: mesSeleccionado,
           anio: anoSeleccionado,
           usuario: usuarioObjetivo,
-          modoEscaneo: modoSeleccionado,
-          apiKey: claveGeminiLocal || undefined
+          modoEscaneo: modoSeleccionado
         })
       });
-
-      if (resServidor.ok) {
-        const dataServ = await resServidor.json();
-        if (dataServ && Array.isArray(dataServ.meses) && dataServ.meses.length > 0) {
-          resultado = dataServ;
-        } else {
-          ultimoErrorDetalle = 'El modelo no devolvió ningún mes con turnos.';
-        }
+      const dataServ = await resServidor.json().catch(() => ({}));
+      if (resServidor.ok && Array.isArray(dataServ.meses) && dataServ.meses.length > 0) {
+        resultado = dataServ;
       } else {
-        const errJson = await resServidor.json().catch(() => ({}));
-        ultimoErrorDetalle = errJson.message || errJson.error || `Error ${resServidor.status}`;
+        ultimoErrorDetalle = dataServ.message || dataServ.error || `Error ${resServidor.status}`;
       }
     } catch (errServ) {
       console.warn('Fallo consulta a /api/analizar-cuadrante:', errServ);
@@ -5044,7 +3255,14 @@ if (btnAnalizarFoto) {
     if (!resultado) {
       scanLoadingState.style.display = 'none';
       btnAnalizarFoto.style.display = 'inline-block';
-      alert(`❌ No se pudo analizar el cuadrante en el servidor:\n${ultimoErrorDetalle || 'Comprueba la legibilidad de la imagen o configura GEMINI_API_KEY en las variables de Vercel.'}`);
+      const e = (ultimoErrorDetalle || '').toLowerCase();
+      if (e.includes('quota') || e.includes('resource_exhausted') || e.includes('429')) {
+        alert('⏳ Se alcanzó el límite de consultas de la IA. Espera un minuto y vuelve a intentarlo.');
+      } else if (e.includes('sesión') || e.includes('401')) {
+        alert('🔒 Tu sesión ha caducado. Vuelve a iniciar sesión e inténtalo de nuevo.');
+      } else {
+        alert(`❌ No se pudo analizar el cuadrante.\n\n${ultimoErrorDetalle || 'Comprueba la legibilidad de la imagen.'}`);
+      }
       return;
     }
 
@@ -5093,16 +3311,17 @@ async function aplicarTurnosDetectadosAlCalendario(resultadoScan, usuarioDestino
           dia: d.dia,
           usuario: usuarioFinal,
           indiceEstado: d.indiceEstado,
-          mes_anio: mesAnioKey
+          mes_anio: mesAnioKey,
+          grupo: grupoActivo
         });
       }
 
       filasParaSupabase.push({
         dia: d.dia,
         usuario: usuarioFinal,
-        usuario_id: miUserId,
         indiceEstado: d.indiceEstado,
-        mes_anio: mesAnioKey
+        mes_anio: mesAnioKey,
+        grupo: grupoActivo
       });
     });
 
@@ -5153,15 +3372,19 @@ async function aplicarTurnosDetectadosAlCalendario(resultadoScan, usuarioDestino
 
 // Sincronización en bloque (batch upsert) con Supabase para máxima velocidad
 async function guardarTurnosEnLote(filas) {
-  if (!filas || filas.length === 0) return;
+  if (!filas || filas.length === 0) return true;
   try {
-    const BLOQUE = 80;
+    const BLOQUE = 200;
     for (let i = 0; i < filas.length; i += BLOQUE) {
-      const chunk = filas.slice(i, i + BLOQUE);
-      await supabaseApp.from('Turnos').upsert(chunk, { onConflict: 'usuario,dia,mes_anio' });
+      const chunk = filas.slice(i, i + BLOQUE).map(({ grupo, ...resto }) => resto);
+      const { error } = await supabaseApp.from('Turnos').upsert(chunk, { onConflict: 'usuario,dia,mes_anio' });
+      if (error) throw error;
     }
+    [...new Set(filas.map(f => f.mes_anio))].forEach(m => notificarCoincidencias(m));
+    return true;
   } catch (err) {
     console.warn('Aviso sincronizando turnos en Supabase:', err);
+    return false;
   }
 }
 
@@ -5338,43 +3561,29 @@ function inicializarNavegacionPestanas() {
   const btnTopUser = document.getElementById('btn-top-user-pill');
 
   function cambiarPestana(tabName) {
-    if (!tabName) return;
     tabBtns.forEach(btn => {
-      const match = btn.dataset.tab === tabName;
-      btn.classList.toggle('activo', match);
-      btn.classList.toggle('active', match);
+      btn.classList.toggle('activo', btn.dataset.tab === tabName);
     });
 
     tabPanes.forEach(pane => {
       const coincide = pane.id === `tab-${tabName}`;
       pane.style.display = coincide ? 'block' : 'none';
-      pane.classList.toggle('activo', coincide);
-      pane.classList.toggle('active', coincide);
     });
 
-    // Acciones específicas al activar cada pestaña de forma segura
-    try {
-      if (tabName === 'planes') {
-        if (typeof pintarPlanesEnPantalla === 'function') pintarPlanesEnPantalla();
-      } else if (tabName === 'chat') {
-        if (typeof scrollChatAlFinal === 'function') scrollChatAlFinal();
-      } else if (tabName === 'grupos') {
-        if (typeof renderizarSelectorGrupos === 'function') renderizarSelectorGrupos();
-        if (typeof renderizarPanelGestionGrupoActivo === 'function') renderizarPanelGestionGrupoActivo();
-      } else if (tabName === 'usuarios') {
-        if (typeof actualizarEdicionPersonaDesplegable === 'function') actualizarEdicionPersonaDesplegable();
-        if (typeof renderizarPanelGestionUsuarios === 'function') renderizarPanelGestionUsuarios();
-      } else if (tabName === 'cuadrante') {
-        if (typeof renderizarSelectoresUsuarios === 'function') renderizarSelectoresUsuarios();
-        if (typeof renderizarFiltroCoincidencias === 'function') renderizarFiltroCoincidencias();
-        if (typeof iniciarCalendario === 'function') iniciarCalendario();
-      }
-    } catch(errTab) {
-      console.warn('Aviso al cambiar a pestaña ' + tabName, errTab);
+    // Acciones específicas al activar cada pestaña
+    if (tabName === 'planes') {
+      pintarPlanesEnPantalla();
+    } else if (tabName === 'chat') {
+      if (typeof scrollChatAlFinal === 'function') scrollChatAlFinal();
+    } else if (tabName === 'grupos') {
+      renderizarSelectorGrupos();
+      if (typeof renderizarPanelGestionGrupoActivo === 'function') renderizarPanelGestionGrupoActivo();
+    } else if (tabName === 'usuarios') {
+      poblarEditorPersonaDesplegable();
+    } else if (tabName === 'cuadrante') {
+      iniciarCalendario();
     }
   }
-
-  window.cambiarPestana = cambiarPestana;
 
   tabBtns.forEach(btn => {
     btn.addEventListener('click', () => {
@@ -5395,14 +3604,6 @@ function inicializarNavegacionPestanas() {
     btnTopPersonas.addEventListener('click', () => cambiarPestana('usuarios'));
   }
 
-  // Conectar botón de clave Gemini en la pestaña de usuarios
-  const btnToggleConfigIATab = document.getElementById('btn-toggle-config-ia-tab');
-  if (btnToggleConfigIATab) {
-    btnToggleConfigIATab.addEventListener('click', () => {
-      if (btnAbrirScanFoto) btnAbrirScanFoto.click();
-      if (btnToggleConfigIA) setTimeout(() => btnToggleConfigIA.click(), 100);
-    });
-  }
 }
 
 // =========================================================================
@@ -5410,198 +3611,30 @@ function inicializarNavegacionPestanas() {
 // =========================================================================
 window.addEventListener('DOMContentLoaded', async () => {
   // Inicializar navegación por pestañas limpias
-  try { inicializarNavegacionPestanas(); } catch(e) { console.warn(e); }
+  inicializarNavegacionPestanas();
 
   // Cargar lista dinámica de usuarios y grupos desde Supabase
-  try { await cargarGruposDesdeBD(); } catch(e) { console.warn('Aviso cargando grupos:', e); }
-  try { await cargarUsuariosDesdeBD(); } catch(e) { console.warn('Aviso cargando usuarios:', e); }
+  try { await cargarGruposDesdeBD(); } catch (e) {}
+  try { await cargarUsuariosDesdeBD(); } catch (e) {}
 
-  // Inicializar filtros y controles para universitarios y puntos de encuentro
-  try { inicializarSelectorLugarQuedada(); } catch(e) {}
-  try { inicializarModoUniversitarioPerfil(); } catch(e) {}
-
-  // Determinar usuario activo al iniciar la app: Cule (Administrador) por defecto obligatorio
-  let usuarioInicial = 'Cule';
-  let esAdminInicial = true;
+  if (!listaGrupos || listaGrupos.length === 0) listaGrupos = [...GRUPOS_DEFECTO];
+  if (!listaPerfiles || listaPerfiles.length === 0) listaPerfiles = [...PERFILES_DEFECTO];
+  if (!usuarios || usuarios.length === 0) usuarios = listaPerfiles.map(p => p.nombre);
 
   try {
-    const usuarioGuardado = localStorage.getItem('kedadas_usuario_activo');
-    // Si el usuario guardado era 'Marisol' u otro que causaba el fallo, forzar 'Cule'
-    if (usuarioGuardado && usuarioGuardado.trim().toLowerCase() !== 'marisol' && usuarioGuardado.trim().toLowerCase() !== 'usuario') {
-      usuarioInicial = usuarioGuardado.trim();
-      esAdminInicial = (usuarioInicial.toLowerCase() === 'cule');
-    } else {
-      usuarioInicial = 'Cule';
-      esAdminInicial = true;
-      localStorage.setItem('kedadas_usuario_activo', 'Cule');
-    }
-  } catch(e) {}
-
-  try {
-    const { data: { session } } = await supabaseApp.auth.getSession();
-    if (session && session.user) {
-      const email = session.user.email;
-      let nombre = session.user.user_metadata?.nombre;
-      // Si la sesión de Supabase Auth es explícitamente Cule o admin
-      if (nombre && (nombre.toLowerCase() === 'cule' || email === 'maculecale@gmail.com')) {
-        usuarioInicial = 'Cule';
-        esAdminInicial = true;
-      }
+    const sesionOk = await iniciarDesdeSesion();
+    if (!sesionOk) {
+      console.log('⚡ Acceso directo activado: entrando como Cule (Admin)');
+      concederAcceso('Cule', true);
     }
   } catch (e) {
-    console.warn('No se encontró sesión activa de Supabase Auth.');
-  }
-
-  // Arrancar siempre con acceso concedido a Cule (o usuario seleccionado)
-  try {
-    concederAcceso(usuarioInicial, esAdminInicial);
-  } catch(e) {
-    console.error('Error concediendo acceso inicial:', e);
+    console.warn('Accediendo como Cule de forma directa:', e);
+    concederAcceso('Cule', true);
   }
 
   // Detectar automáticamente si se ha abierto un enlace de invitación (?unirse=KED-XXXX)
-  try {
-    comprobarParametroInvitacionUrl();
-  } catch(e) {}
-
-  // Sistema de compartir horarios e invitaciones directas
-  try { inicializarEventosCompartirHorario(); } catch(e) {}
-  try { await cargarPermisosCalendarioDesdeBD(); } catch(e) {}
-  try { await comprobarParametroCompartirHorarioUrl(); } catch(e) {}
+  comprobarParametroInvitacionUrl();
 });
-
-// Inicializa el formulario del perfil para modo universitario
-function inicializarModoUniversitarioPerfil() {
-  const checkUniv = document.getElementById('check-es-universitario');
-  const cajaCampos = document.getElementById('caja-campos-universitario');
-  const inputOrigen = document.getElementById('input-ciudad-origen');
-  const inputUniv = document.getElementById('input-ciudad-univ');
-  const btnUbiOrigen = document.getElementById('btn-ubicacion-origen');
-  const btnUbiUniv = document.getElementById('btn-ubicacion-univ');
-  const btnGuardarUniv = document.getElementById('btn-guardar-perfil-univ');
-
-  let ubicacionSeleccionada = 'origen';
-
-  function cargarDatosEnFormulario() {
-    const usuarioABuscar = miUsuario || usuarioLogueado || 'Cule';
-    const miPerfil = listaPerfiles.find(p => p.nombre.toLowerCase() === usuarioABuscar.toLowerCase());
-    if (!miPerfil) return;
-    
-    // Forzar Plasencia para Cule o perfiles con Toledo residual
-    if (miPerfil.nombre.toLowerCase() === 'cule' || miPerfil.ciudad_origen === 'Toledo' || !miPerfil.ciudad_origen) {
-      miPerfil.ciudad_origen = 'Plasencia';
-    }
-
-    const esUniv = !!miPerfil.es_universitario;
-    if (checkUniv) checkUniv.checked = esUniv;
-    if (cajaCampos) cajaCampos.style.display = esUniv ? 'block' : 'none';
-    if (inputOrigen) inputOrigen.value = miPerfil.ciudad_origen || 'Plasencia';
-    if (inputUniv) inputUniv.value = miPerfil.ciudad_universidad || '';
-    
-    ubicacionSeleccionada = miPerfil.ubicacion_actual || 'origen';
-    if (btnUbiOrigen && btnUbiUniv) {
-      btnUbiOrigen.classList.toggle('activo', ubicacionSeleccionada === 'origen');
-      btnUbiUniv.classList.toggle('activo', ubicacionSeleccionada === 'universidad');
-    }
-
-    // Cargar clave actual del usuario en la tarjeta de contraseña
-    const inputMiPass = document.getElementById('input-mi-password-perfil');
-    if (inputMiPass) {
-      inputMiPass.value = obtenerContrasenaUsuario(usuarioABuscar);
-    }
-  }
-
-  // Guardar contraseña de horario desde la tarjeta del perfil
-  const btnGuardarMiPass = document.getElementById('btn-guardar-mi-password');
-  const inputMiPass = document.getElementById('input-mi-password-perfil');
-  if (btnGuardarMiPass && inputMiPass && !btnGuardarMiPass.dataset.listenerAttached) {
-    btnGuardarMiPass.dataset.listenerAttached = 'true';
-    btnGuardarMiPass.addEventListener('click', async () => {
-      const nuevoPass = (inputMiPass.value || '').trim();
-      if (!nuevoPass || nuevoPass.length < 3) {
-        return alert('Por favor, escribe una contraseña válida de al menos 3 caracteres.');
-      }
-      const yo = usuarioLogueado || miUsuario || 'Cule';
-      btnGuardarMiPass.textContent = 'Guardando...';
-      await guardarContrasenaUsuario(yo, nuevoPass);
-      btnGuardarMiPass.textContent = '💾 Guardar Clave';
-      if (typeof confetti === 'function') confetti({ particleCount: 30, spread: 60 });
-      alert(`✅ ¡Contraseña de "${yo}" actualizada con éxito!\nAhora tu cuadrante está protegido con tu nueva clave de acceso.`);
-    });
-  }
-
-  if (checkUniv) {
-    checkUniv.addEventListener('change', () => {
-      if (cajaCampos) cajaCampos.style.display = checkUniv.checked ? 'block' : 'none';
-    });
-  }
-
-  if (btnUbiOrigen) {
-    btnUbiOrigen.addEventListener('click', () => {
-      ubicacionSeleccionada = 'origen';
-      btnUbiOrigen.classList.add('activo');
-      if (btnUbiUniv) btnUbiUniv.classList.remove('activo');
-    });
-  }
-  if (btnUbiUniv) {
-    btnUbiUniv.addEventListener('click', () => {
-      ubicacionSeleccionada = 'universidad';
-      btnUbiUniv.classList.add('activo');
-      if (btnUbiOrigen) btnUbiOrigen.classList.remove('activo');
-    });
-  }
-
-  if (btnGuardarUniv) {
-    btnGuardarUniv.addEventListener('click', async () => {
-      const usuarioABuscar = miUsuario || usuarioLogueado || 'Cule';
-      const miPerfil = listaPerfiles.find(p => p.nombre.toLowerCase() === usuarioABuscar.toLowerCase());
-      if (!miPerfil) return;
-      miPerfil.es_universitario = checkUniv ? checkUniv.checked : false;
-      miPerfil.ciudad_origen = inputOrigen ? (inputOrigen.value.trim() || 'Plasencia') : 'Plasencia';
-      miPerfil.ciudad_universidad = inputUniv ? inputUniv.value.trim() : '';
-      miPerfil.ubicacion_actual = ubicacionSeleccionada;
-
-      guardarPerfilesLocales();
-
-      try {
-        btnGuardarUniv.textContent = 'Guardando...';
-        await supabaseApp.from('perfiles').update({
-          es_universitario: miPerfil.es_universitario,
-          ciudad_origen: miPerfil.ciudad_origen,
-          ciudad_universidad: miPerfil.ciudad_universidad,
-          ubicacion_actual: miPerfil.ubicacion_actual
-        }).eq('nombre', miPerfil.nombre);
-        btnGuardarUniv.textContent = '💾 Guardar mis datos universitarios';
-        alert(`✅ Datos universitarios de ${miPerfil.nombre} guardados correctamente.`);
-      } catch(e) {
-        btnGuardarUniv.textContent = '💾 Guardar mis datos universitarios';
-      }
-
-      renderizarFiltroCoincidencias();
-      renderizarBannerUbicacionUniversitarios();
-    });
-  }
-
-  cargarDatosEnFormulario();
-  window.cargarDatosUniversitariosEnPerfil = cargarDatosEnFormulario;
-}
-
-// Permite proponer directamente un plan sugerido de punto de encuentro al muro de votaciones
-window.proponerPlanDesdeCoincidencia = function(titulo) {
-  const inputNuevoPlan = document.getElementById('input-nuevo-plan');
-  const btnNuevoPlanDesplegar = document.getElementById('btn-nuevo-plan-desplegar');
-  const formNuevoPlan = document.getElementById('form-nuevo-plan');
-  const tabBtnPlanes = document.querySelector('.nav-tab-btn[data-tab="planes"]');
-
-  if (tabBtnPlanes) tabBtnPlanes.click();
-  if (formNuevoPlan) formNuevoPlan.style.display = 'block';
-  if (inputNuevoPlan) {
-    inputNuevoPlan.value = titulo;
-    inputNuevoPlan.focus();
-  }
-  const seccionVotaciones = document.getElementById('seccion-votaciones');
-  if (seccionVotaciones) seccionVotaciones.scrollIntoView({ behavior: 'smooth' });
-};
 
 // Comprueba si la URL contiene un código de invitación y solicita unirse al grupo
 function comprobarParametroInvitacionUrl() {
@@ -5620,7 +3653,3 @@ function comprobarParametroInvitacionUrl() {
   } catch (e) {}
 }
 
-// Inicializar selector rápido de ubicación al arrancar
-try {
-  inicializarSelectorUbicacionRapido();
-} catch (e) {}
