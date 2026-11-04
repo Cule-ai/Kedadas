@@ -17,6 +17,9 @@ const btnLoginPin = document.getElementById('btn-login-pin');
 const btnLoginFace = document.getElementById('btn-login-faceid');
 
 // Elementos de Supabase Auth
+const tabAuthLogin = document.getElementById('tab-auth-login');
+const tabAuthRegistro = document.getElementById('tab-auth-registro');
+const wrapNombreReg = document.getElementById('wrap-nombre-registro');
 const tabAuthEmail = document.getElementById('tab-auth-email');
 const tabAuthPin = document.getElementById('tab-auth-pin');
 const formAuthEmail = document.getElementById('form-auth-email');
@@ -91,6 +94,33 @@ if (btnAccesoDirecto) {
   });
 }
 
+// Alternar entre pestañas de Login y Registro
+if (tabAuthLogin && tabAuthRegistro) {
+  tabAuthLogin.addEventListener('click', () => {
+    tabAuthLogin.classList.add('activo');
+    tabAuthRegistro.classList.remove('activo');
+    if (wrapNombreReg) wrapNombreReg.style.display = 'none';
+    if (btnLoginEmail) btnLoginEmail.style.display = 'block';
+    if (btnRegisterEmail) btnRegisterEmail.style.display = 'none';
+    if (linkRecuperarPass) linkRecuperarPass.style.display = 'inline-block';
+  });
+
+  tabAuthRegistro.addEventListener('click', () => {
+    tabAuthRegistro.classList.add('activo');
+    tabAuthLogin.classList.remove('activo');
+    if (wrapNombreReg) {
+      wrapNombreReg.style.display = 'block';
+      if (loginNombreReg) loginNombreReg.focus();
+    }
+    if (btnLoginEmail) btnLoginEmail.style.display = 'none';
+    if (btnRegisterEmail) {
+      btnRegisterEmail.style.display = 'block';
+      btnRegisterEmail.textContent = 'Crear Cuenta';
+    }
+    if (linkRecuperarPass) linkRecuperarPass.style.display = 'none';
+  });
+}
+
 // Iniciar sesión con Supabase Auth (Email y Contraseña)
 if (btnLoginEmail) {
   btnLoginEmail.addEventListener('click', async () => {
@@ -115,14 +145,7 @@ if (btnLoginEmail) {
 // Registro de nueva cuenta con Supabase Auth
 if (btnRegisterEmail) {
   btnRegisterEmail.addEventListener('click', async () => {
-    if (loginNombreReg.style.display === 'none') {
-      loginNombreReg.style.display = 'block';
-      loginNombreReg.focus();
-      btnRegisterEmail.textContent = 'Confirmar Registro';
-      return;
-    }
-
-    const nombre = loginNombreReg.value.trim();
+    const nombre = (loginNombreReg ? loginNombreReg.value : '').trim();
     const email = loginEmail.value.trim();
     const password = loginPassword.value;
 
