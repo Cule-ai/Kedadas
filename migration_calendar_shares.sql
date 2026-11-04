@@ -7,6 +7,24 @@
 create extension if not exists "uuid-ossp";
 create extension if not exists pgcrypto;
 
+-- 1.1 Asegurar existencia de la función auxiliar is_superadmin()
+create or replace function public.is_superadmin()
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select exists (
+    select 1 where lower(coalesce(auth.jwt()->>'email', '')) = 'maculecale@gmail.com'
+    or exists (
+      select 1 from public.perfiles p
+      where p.user_id = auth.uid()
+        and coalesce(p.is_superadmin, false) = true
+    )
+  );
+$$;
+
 -- 2. Crear tabla public.calendar_shares si no existe
 create table if not exists public.calendar_shares (
   id uuid primary key default gen_random_uuid(),
@@ -51,13 +69,13 @@ begin
       using (
         public.is_superadmin()
         or usuario_id = auth.uid()
-        or lower(usuario) = lower(coalesce(auth.jwt()->>''user_metadata''->>''nombre'', split_part(auth.jwt()->>''email'', ''@'', 1)))
+        or lower(usuario) = lower(coalesce(auth.jwt()->''user_metadata''->>''nombre'', split_part(auth.jwt()->>''email'', ''@'', 1)))
         or usuario in (select p.nombre from public.perfiles p where p.user_id = auth.uid())
         or exists (
           select 1 from public.calendar_shares cs
           where lower(cs.owner_name) = lower(public."Turnos".usuario)
             and (
-              lower(cs.granted_to) = lower(coalesce(auth.jwt()->>''user_metadata''->>''nombre'', split_part(auth.jwt()->>''email'', ''@'', 1)))
+              lower(cs.granted_to) = lower(coalesce(auth.jwt()->''user_metadata''->>''nombre'', split_part(auth.jwt()->>''email'', ''@'', 1)))
               or cs.granted_to in (select p.nombre from public.perfiles p where p.user_id = auth.uid())
               or cs.granted_to_id = auth.uid()
             )

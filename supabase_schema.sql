@@ -666,13 +666,13 @@ begin
       using (
         public.is_superadmin()
         or usuario_id = auth.uid()
-        or lower(usuario) = lower(coalesce(auth.jwt()->>''user_metadata''->>''nombre'', split_part(auth.jwt()->>''email'', ''@'', 1)))
+        or lower(usuario) = lower(coalesce(auth.jwt()->''user_metadata''->>''nombre'', split_part(auth.jwt()->>''email'', ''@'', 1)))
         or usuario in (select p.nombre from public.perfiles p where p.user_id = auth.uid())
         or exists (
           select 1 from public.calendar_shares cs
           where lower(cs.owner_name) = lower(public."Turnos".usuario)
             and (
-              lower(cs.granted_to) = lower(coalesce(auth.jwt()->>''user_metadata''->>''nombre'', split_part(auth.jwt()->>''email'', ''@'', 1)))
+              lower(cs.granted_to) = lower(coalesce(auth.jwt()->''user_metadata''->>''nombre'', split_part(auth.jwt()->>''email'', ''@'', 1)))
               or cs.granted_to in (select p.nombre from public.perfiles p where p.user_id = auth.uid())
               or cs.granted_to_id = auth.uid()
             )
