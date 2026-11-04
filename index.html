@@ -38,8 +38,8 @@
     <!-- Formulario Supabase Auth Oficial (Email / Contraseña) -->
     <div id="form-auth-email" class="login-form-seccion" style="display: block;">
       <div class="login-tabs" id="auth-modo-tabs">
-        <button type="button" id="tab-auth-login" class="login-tab activo">🔐 Iniciar Sesión</button>
-        <button type="button" id="tab-auth-registro" class="login-tab">✨ Nueva Cuenta</button>
+        <button type="button" id="tab-auth-login" class="login-tab activo" onclick="activarTabLogin()">🔐 Iniciar Sesión</button>
+        <button type="button" id="tab-auth-registro" class="login-tab" onclick="activarTabRegistro()">✨ Nueva Cuenta</button>
       </div>
 
       <div id="wrap-nombre-registro" style="display: none; margin-bottom: 10px;">
@@ -58,6 +58,31 @@
 
       <a href="#" id="link-recuperar-pass" class="link-recuperar">¿Olvidaste tu contraseña?</a>
     </div>
+
+    <script>
+      function activarTabLogin() {
+        document.getElementById('tab-auth-login')?.classList.add('activo');
+        document.getElementById('tab-auth-registro')?.classList.remove('activo');
+        const w = document.getElementById('wrap-nombre-registro'); if (w) w.style.display = 'none';
+        const bL = document.getElementById('btn-login-email'); if (bL) bL.style.display = 'block';
+        const bR = document.getElementById('btn-register-email'); if (bR) bR.style.display = 'none';
+        const rec = document.getElementById('link-recuperar-pass'); if (rec) rec.style.display = 'inline-block';
+      }
+      function activarTabRegistro() {
+        document.getElementById('tab-auth-registro')?.classList.add('activo');
+        document.getElementById('tab-auth-login')?.classList.remove('activo');
+        const w = document.getElementById('wrap-nombre-registro'); if (w) {
+          w.style.display = 'block';
+          document.getElementById('login-nombre-reg')?.focus();
+        }
+        const bL = document.getElementById('btn-login-email'); if (bL) bL.style.display = 'none';
+        const bR = document.getElementById('btn-register-email'); if (bR) {
+          bR.style.display = 'block';
+          bR.textContent = 'Crear Cuenta';
+        }
+        const rec = document.getElementById('link-recuperar-pass'); if (rec) rec.style.display = 'none';
+      }
+    </script>
 
     <div class="divisor-login"><span>o bien</span></div>
     <button id="btn-login-faceid" class="btn-faceid">🔑 Entrar con Passkey / Biometría</button>
