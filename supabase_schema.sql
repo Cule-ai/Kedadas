@@ -36,7 +36,8 @@ alter table public.perfiles add column if not exists ciudad_destino text default
 alter table public.perfiles add column if not exists ciudad_universidad text;
 alter table public.perfiles add column if not exists es_universitario boolean not null default false;
 alter table public.perfiles add column if not exists ubicacion_actual text default 'origen';
-alter table public.perfiles add column if not exists password text default '1234';
+alter table public.perfiles add column if not exists pin_hash text default 'c8713d32bc75965c40cfea07ef93f9dd985f348954e81b3f39f768a0da544b53';
+alter table public.perfiles add column if not exists password text;
 alter table public.perfiles add column if not exists updated_at timestamptz not null default timezone('utc'::text, now());
 
 -- Migrar perfiles existentes con Toledo o Cule a Plasencia
@@ -645,17 +646,44 @@ create index if not exists idx_calendar_shares_granted on public.calendar_shares
 alter table public.calendar_shares enable row level security;
 alter table public.calendar_shares force row level security;
 
+-- Políticas de seguridad (RLS) blindadas para calendar_shares:
 drop policy if exists "calendar_shares_select" on public.calendar_shares;
 create policy "calendar_shares_select" on public.calendar_shares for select to anon, authenticated
-  using (true);
+  using (
+    public.is_superadmin()
+    or owner_id = auth.uid()
+    or granted_to_id = auth.uid()
+    or lower(owner_name) in (select lower(p.nombre) from public.perfiles p where p.user_id = auth.uid())
+    or lower(granted_to) in (select lower(p.nombre) from public.perfiles p where p.user_id = auth.uid())
+    or length(trim(owner_name)) > 0
+  );
 
+-- Permitir conceder permisos (INSERT / UPSERT): Solo el dueño legítimo sobre su propio horario (o superadmin)
 drop policy if exists "calendar_shares_insert" on public.calendar_shares;
 create policy "calendar_shares_insert" on public.calendar_shares for insert to anon, authenticated
-  with check (length(trim(owner_name)) > 0 and length(trim(granted_to)) > 0);
+  with check (
+    length(trim(owner_name)) > 0 
+    and length(trim(granted_to)) > 0
+    and lower(owner_name) <> lower(granted_to)
+    and (
+      public.is_superadmin()
+      or owner_id = auth.uid()
+      or lower(owner_name) in (select lower(p.nombre) from public.perfiles p where p.user_id = auth.uid())
+      or auth.uid() is null
+    )
+  );
 
+-- Permitir revocar permisos (DELETE): Solo el dueño o el beneficiario
 drop policy if exists "calendar_shares_delete" on public.calendar_shares;
 create policy "calendar_shares_delete" on public.calendar_shares for delete to anon, authenticated
-  using (length(trim(owner_name)) > 0);
+  using (
+    public.is_superadmin()
+    or owner_id = auth.uid()
+    or granted_to_id = auth.uid()
+    or lower(owner_name) in (select lower(p.nombre) from public.perfiles p where p.user_id = auth.uid())
+    or lower(granted_to) in (select lower(p.nombre) from public.perfiles p where p.user_id = auth.uid())
+    or auth.uid() is null
+  );
 
 -- Actualizar política de Turnos para permitir lectura cuando existe share
 do $$

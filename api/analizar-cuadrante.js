@@ -30,6 +30,11 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Falta la imagen en base64 en la petición.' });
     }
 
+    // Límite de seguridad de tamaño de carga útil (máx. 15MB) para mitigar agotamiento de recursos / DoS
+    if (typeof imageBase64 === 'string' && imageBase64.length > 15 * 1024 * 1024) {
+      return res.status(413).json({ error: 'La imagen excede el límite máximo de tamaño permitido (10MB).' });
+    }
+
     // Tomar la clave de Gemini proporcionada por el cliente o la variable de entorno de Vercel
     const geminiKey = clientApiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
 

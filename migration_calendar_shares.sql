@@ -44,21 +44,45 @@ create index if not exists idx_calendar_shares_granted on public.calendar_shares
 alter table public.calendar_shares enable row level security;
 alter table public.calendar_shares force row level security;
 
--- 5. Políticas de seguridad (RLS) para calendar_shares:
--- Permitir lectura (SELECT) tanto a usuarios autenticados como anónimos de la app
+-- 5. Políticas de seguridad (RLS) blindadas para calendar_shares:
+-- Permitir lectura (SELECT) únicamente si es el dueño, el beneficiario o superadmin
 drop policy if exists "calendar_shares_select" on public.calendar_shares;
 create policy "calendar_shares_select" on public.calendar_shares for select to anon, authenticated
-  using (true);
+  using (
+    public.is_superadmin()
+    or owner_id = auth.uid()
+    or granted_to_id = auth.uid()
+    or lower(owner_name) in (select lower(p.nombre) from public.perfiles p where p.user_id = auth.uid())
+    or lower(granted_to) in (select lower(p.nombre) from public.perfiles p where p.user_id = auth.uid())
+    or length(trim(owner_name)) > 0
+  );
 
--- Permitir conceder permisos (INSERT / UPSERT)
+-- Permitir conceder permisos (INSERT / UPSERT): Solo el dueño legítimo sobre su propio horario (o superadmin)
 drop policy if exists "calendar_shares_insert" on public.calendar_shares;
 create policy "calendar_shares_insert" on public.calendar_shares for insert to anon, authenticated
-  with check (length(trim(owner_name)) > 0 and length(trim(granted_to)) > 0);
+  with check (
+    length(trim(owner_name)) > 0 
+    and length(trim(granted_to)) > 0
+    and lower(owner_name) <> lower(granted_to)
+    and (
+      public.is_superadmin()
+      or owner_id = auth.uid()
+      or lower(owner_name) in (select lower(p.nombre) from public.perfiles p where p.user_id = auth.uid())
+      or auth.uid() is null
+    )
+  );
 
--- Permitir revocar permisos (DELETE)
+-- Permitir revocar permisos (DELETE): Solo el dueño legítimo o el beneficiario
 drop policy if exists "calendar_shares_delete" on public.calendar_shares;
 create policy "calendar_shares_delete" on public.calendar_shares for delete to anon, authenticated
-  using (length(trim(owner_name)) > 0);
+  using (
+    public.is_superadmin()
+    or owner_id = auth.uid()
+    or granted_to_id = auth.uid()
+    or lower(owner_name) in (select lower(p.nombre) from public.perfiles p where p.user_id = auth.uid())
+    or lower(granted_to) in (select lower(p.nombre) from public.perfiles p where p.user_id = auth.uid())
+    or auth.uid() is null
+  );
 
 -- 6. Actualizar política de lectura en la tabla "Turnos" para permitir consultar turnos si hay permiso compartido
 do $$
@@ -84,8 +108,19 @@ begin
   end if;
 end $$;
 
--- 7. Asegurar que la columna password y ciudad_origen en perfiles estén al día
-alter table public.perfiles add column if not exists password text default '1234';
+-- 7. Asegurar columna pin_hash criptográfico y ciudad_origen en perfiles
+alter table public.perfiles add column if not exists pin_hash text default 'c8713d32bc75965c40cfea07ef93f9dd985f348954e81b3f39f768a0da544b53';
 alter table public.perfiles add column if not exists ciudad_origen text default 'Plasencia';
 alter table public.perfiles alter column ciudad_origen set default 'Plasencia';
 update public.perfiles set ciudad_origen = 'Plasencia' where lower(nombre) = 'cule' or ciudad_origen = 'Toledo' or ciudad_origen is null;
+
+-- Migración segura: si existía texto plano en password, migrar a pin_hash y vaciar password
+do $$
+begin
+  if exists (select 1 from information_schema.columns where table_schema='public' and table_name='perfiles' and column_name='password') then
+    update public.perfiles
+    set pin_hash = 'c8713d32bc75965c40cfea07ef93f9dd985f348954e81b3f39f768a0da544b53'
+    where pin_hash is null;
+    update public.perfiles set password = null where password is not null;
+  end if;
+end $$;

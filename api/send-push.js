@@ -5,18 +5,24 @@ import webpush from 'web-push';
 import { createClient } from '@supabase/supabase-js';
 
 const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || 'BPFV66ewMSEPBptLh0be-rpRSnEc01H4_HoFHxglPYyCb6Bequ7WFeqUhqMzMcB7PBninBqx4gBbrEyq1R1jxvI';
-const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || '_LZ0ZvNRbaDFzrLE-nuENUwrtRtP7KI2YlRtfCE9FGk';
+const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
 const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:maculecale@gmail.com';
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://idpgvtixeyytfgpkqjjm.supabase.co';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || 'sb_publishable_S7NTo7XKekBigTm8U17rQA_u2Cp0SrI';
 
-webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+if (VAPID_PRIVATE_KEY) {
+  try {
+    webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+  } catch(e) {
+    console.error('Error inicializando VAPID:', e.message);
+  }
+}
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
@@ -26,7 +32,31 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Método no permitido. Usa POST.' });
   }
 
+  if (!VAPID_PRIVATE_KEY) {
+    return res.status(500).json({ error: 'Configuración del servidor incompleta (VAPID_PRIVATE_KEY requerida en variables de entorno).' });
+  }
+
   try {
+    // 0. Verificación de Seguridad y Autorización
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+    const apiKey = req.headers['x-api-key'];
+
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+
+    // Permitir si se proporciona la clave interna PUSH_API_SECRET o un token de sesión válido de Supabase
+    const secretKey = process.env.PUSH_API_SECRET;
+    const isApiKeyValid = secretKey && apiKey === secretKey;
+
+    if (!isApiKeyValid) {
+      if (!token) {
+        return res.status(401).json({ error: 'No autorizado. Se requiere inicio de sesión para enviar notificaciones.' });
+      }
+      const { data: userData, error: userError } = await supabase.auth.getUser(token);
+      if (userError || !userData?.user) {
+        return res.status(401).json({ error: 'Token de sesión no válido o expirado.' });
+      }
+    }
     const {
       title = 'Kedadas',
       body = '¡Nueva actividad o coincidencia en tu grupo!',

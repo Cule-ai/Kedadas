@@ -361,11 +361,27 @@ function concederAcceso(nombreUsuario, rolAdmin) {
 const STORAGE_PERFILES_KEY = 'kedadas_perfiles_v2';
 const STORAGE_USUARIOS_KEY = 'listaUsuarios';
 
+const HASH_DEFECTO_1234 = 'c8713d32bc75965c40cfea07ef93f9dd985f348954e81b3f39f768a0da544b53';
+
+async function hashPin(pin) {
+  if (!pin) return '';
+  const str = String(pin).trim();
+  if (/^[a-f0-9]{64}$/i.test(str)) return str.toLowerCase();
+  try {
+    const msgUint8 = new TextEncoder().encode(str + '_kedadas_salt_2026');
+    const hashBuffer = await window.crypto.subtle.digest('SHA-256', msgUint8);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  } catch(e) {
+    return HASH_DEFECTO_1234;
+  }
+}
+
 const PERFILES_DEFECTO = [
-  { id: 'Cule', nombre: 'Cule', rol: 'admin', es_universitario: false, ciudad_origen: 'Plasencia', ciudad_universidad: 'Madrid', ubicacion_actual: 'origen', password: '1234' },
-  { id: 'Persona 2', nombre: 'Persona 2', rol: 'usuario', es_universitario: true, ciudad_origen: 'Plasencia', ciudad_universidad: 'Madrid', ubicacion_actual: 'universidad', password: '1234' },
-  { id: 'Persona 3', nombre: 'Persona 3', rol: 'usuario', es_universitario: false, ciudad_origen: 'Plasencia', ciudad_universidad: '', ubicacion_actual: 'origen', password: '1234' },
-  { id: 'Persona 4', nombre: 'Persona 4', rol: 'usuario', es_universitario: false, ciudad_origen: 'Plasencia', ciudad_universidad: '', ubicacion_actual: 'origen', password: '1234' }
+  { id: 'Cule', nombre: 'Cule', rol: 'admin', es_universitario: false, ciudad_origen: 'Plasencia', ciudad_universidad: 'Madrid', ubicacion_actual: 'origen', pin_hash: HASH_DEFECTO_1234 },
+  { id: 'Persona 2', nombre: 'Persona 2', rol: 'usuario', es_universitario: true, ciudad_origen: 'Plasencia', ciudad_universidad: 'Madrid', ubicacion_actual: 'universidad', pin_hash: HASH_DEFECTO_1234 },
+  { id: 'Persona 3', nombre: 'Persona 3', rol: 'usuario', es_universitario: false, ciudad_origen: 'Plasencia', ciudad_universidad: '', ubicacion_actual: 'origen', pin_hash: HASH_DEFECTO_1234 },
+  { id: 'Persona 4', nombre: 'Persona 4', rol: 'usuario', es_universitario: false, ciudad_origen: 'Plasencia', ciudad_universidad: '', ubicacion_actual: 'origen', pin_hash: HASH_DEFECTO_1234 }
 ];
 
 let listaPerfiles = [];
@@ -431,10 +447,10 @@ async function cargarUsuariosDesdeBD() {
 
   // Asegurar que Cule siempre exista con ubicación en Plasencia
   if (!listaPerfiles.some(p => p && p.nombre && p.nombre.toLowerCase() === 'cule')) {
-    listaPerfiles.unshift({ id: 'Cule', nombre: 'Cule', rol: 'admin', ciudad_origen: 'Plasencia', password: '1234' });
+    listaPerfiles.unshift({ id: 'Cule', nombre: 'Cule', rol: 'admin', ciudad_origen: 'Plasencia', pin_hash: HASH_DEFECTO_1234 });
   }
 
-  // Forzar que Cule y perfiles residuales usen Plasencia y tengan contraseña
+  // Forzar que Cule y perfiles residuales usen Plasencia y tengan pin_hash criptográfico
   listaPerfiles.forEach(p => {
     if (!p) return;
     if (p.nombre && p.nombre.toLowerCase() === 'cule') {
@@ -442,9 +458,10 @@ async function cargarUsuariosDesdeBD() {
     } else if (p.ciudad_origen === 'Toledo' || !p.ciudad_origen) {
       p.ciudad_origen = 'Plasencia';
     }
-    if (!p.password) {
-      const stored = localStorage.getItem(`kedadas_pass_${(p.nombre || '').toLowerCase()}`);
-      p.password = stored || '1234';
+    if (!p.pin_hash) {
+      const storedHash = localStorage.getItem(`kedadas_hash_${(p.nombre || '').toLowerCase()}`);
+      p.pin_hash = storedHash || HASH_DEFECTO_1234;
+      delete p.password;
     }
   });
 
@@ -458,13 +475,15 @@ async function cargarUsuariosDesdeBD() {
         if (!dbPerfil || !dbPerfil.nombre) return;
         const local = listaPerfiles.find(p => p && p.nombre && p.nombre.toLowerCase() === dbPerfil.nombre.toLowerCase());
         const dbCiudadOrigen = (dbPerfil.nombre.toLowerCase() === 'cule' || dbPerfil.ciudad_origen === 'Toledo') ? 'Plasencia' : (dbPerfil.ciudad_origen || 'Plasencia');
+        const dbHash = dbPerfil.pin_hash || HASH_DEFECTO_1234;
         if (local) {
           if (dbPerfil.rol) local.rol = dbPerfil.rol;
           if (dbPerfil.es_universitario !== undefined) local.es_universitario = dbPerfil.es_universitario;
           local.ciudad_origen = dbCiudadOrigen;
           if (dbPerfil.ciudad_universidad) local.ciudad_universidad = dbPerfil.ciudad_universidad;
           if (dbPerfil.ubicacion_actual) local.ubicacion_actual = dbPerfil.ubicacion_actual;
-          if (dbPerfil.password) local.password = dbPerfil.password;
+          local.pin_hash = dbHash;
+          delete local.password;
         } else {
           listaPerfiles.push({
             id: dbPerfil.id || dbPerfil.nombre,
@@ -474,7 +493,7 @@ async function cargarUsuariosDesdeBD() {
             ciudad_origen: dbCiudadOrigen,
             ciudad_universidad: dbPerfil.ciudad_universidad || '',
             ubicacion_actual: dbPerfil.ubicacion_actual || 'origen',
-            password: dbPerfil.password || '1234'
+            pin_hash: dbHash
           });
         }
       });
@@ -628,52 +647,75 @@ function poblarSelectorIdentidadUsuario() {
 // =========================================================================
 // --- GESTIÓN DE CONTRASEÑAS POR USUARIO Y PROTECCIÓN DE ACCESO -----------
 // =========================================================================
-function obtenerContrasenaUsuario(nombre) {
-  if (!nombre) return '1234';
+async function obtenerHashContrasenaUsuario(nombre) {
+  if (!nombre) return HASH_DEFECTO_1234;
   const nombreLimpio = String(nombre).trim().toLowerCase();
 
   // 1. Buscar en listaPerfiles
   const p = (listaPerfiles || []).find(item => item && item.nombre && item.nombre.toLowerCase() === nombreLimpio);
-  if (p && p.password) return String(p.password).trim();
+  if (p) {
+    if (p.pin_hash) return String(p.pin_hash).trim().toLowerCase();
+    if (p.password) {
+      const h = await hashPin(p.password);
+      p.pin_hash = h;
+      delete p.password;
+      return h;
+    }
+  }
 
   // 2. Buscar en almacenamiento local por usuario
   try {
-    const custom = localStorage.getItem(`kedadas_pass_${nombreLimpio}`);
-    if (custom) return String(custom).trim();
+    const customHash = localStorage.getItem(`kedadas_hash_${nombreLimpio}`);
+    if (customHash) return String(customHash).trim().toLowerCase();
+    const legacyPass = localStorage.getItem(`kedadas_pass_${nombreLimpio}`);
+    if (legacyPass) {
+      const h = await hashPin(legacyPass);
+      localStorage.setItem(`kedadas_hash_${nombreLimpio}`, h);
+      localStorage.removeItem(`kedadas_pass_${nombreLimpio}`);
+      return h;
+    }
   } catch(e) {}
 
-  return '1234';
+  return HASH_DEFECTO_1234;
+}
+
+// Compatibilidad hacia atrás (retorna máscara o valor protegido, nunca texto plano)
+function obtenerContrasenaUsuario(nombre) {
+  return '••••••••';
 }
 
 async function guardarContrasenaUsuario(nombre, nuevoPass) {
   if (!nombre || !nuevoPass) return false;
   const nombreLimpio = String(nombre).trim();
-  const passLimpio = String(nuevoPass).trim();
+  const hashLimpio = await hashPin(nuevoPass);
 
-  // 1. Actualizar perfil local
+  // 1. Actualizar perfil local de forma segura
   const p = (listaPerfiles || []).find(item => item && item.nombre && item.nombre.toLowerCase() === nombreLimpio.toLowerCase());
   if (p) {
-    p.password = passLimpio;
+    p.pin_hash = hashLimpio;
+    delete p.password;
     guardarPerfilesLocales();
   }
 
-  // 2. Guardar en localStorage
+  // 2. Guardar en localStorage de forma cifrada (hash) y eliminar rastro en texto plano
   try {
-    localStorage.setItem(`kedadas_pass_${nombreLimpio.toLowerCase()}`, passLimpio);
+    localStorage.setItem(`kedadas_hash_${nombreLimpio.toLowerCase()}`, hashLimpio);
+    localStorage.removeItem(`kedadas_pass_${nombreLimpio.toLowerCase()}`);
   } catch(e) {}
 
-  // 3. Sincronizar en Supabase
+  // 3. Sincronizar en Supabase (solo hash, nunca clave en texto plano)
   try {
-    await supabaseApp.from('perfiles').update({ password: passLimpio }).ilike('nombre', nombreLimpio);
+    await supabaseApp.from('perfiles').update({ pin_hash: hashLimpio, password: null }).ilike('nombre', nombreLimpio);
   } catch(e) {}
 
   return true;
 }
 
-function verificarContrasenaUsuario(nombre, passIntroducido) {
+async function verificarContrasenaUsuario(nombre, passIntroducido) {
   if (!passIntroducido) return false;
-  const passCorrecto = obtenerContrasenaUsuario(nombre);
-  return String(passIntroducido).trim() === passCorrecto;
+  const hashIngresado = await hashPin(passIntroducido);
+  const hashCorrecto = await obtenerHashContrasenaUsuario(nombre);
+  return hashIngresado === hashCorrecto;
 }
 
 // Solicitar contraseña obligatoria antes de conmutar de usuario
@@ -688,7 +730,8 @@ async function solicitarCambioUsuarioConContrasena(nuevoNombre) {
     return false;
   }
 
-  if (!verificarContrasenaUsuario(target, pass)) {
+  const esValido = await verificarContrasenaUsuario(target, pass);
+  if (!esValido) {
     alert(`❌ Contraseña incorrecta para "${target}".\nPor motivos de privacidad, no puedes acceder al horario ni a la cuenta de este usuario.`);
     return false;
   }
@@ -2415,11 +2458,18 @@ function tienePermisoCalendario(owner, viewer) {
 }
 
 // Conceder permiso para que `viewer` pueda ver el calendario de `owner`
-async function concederPermisoCalendario(owner, viewer) {
+async function concederPermisoCalendario(owner, viewer, permisoVerificado = false) {
   if (!owner || !viewer) return false;
   const o = String(owner).trim().toLowerCase();
   const v = String(viewer).trim().toLowerCase();
   if (o === v) return true;
+
+  // CONTROL DE SEGURIDAD ESTRICTO: Solo el dueño del horario (o si se verificó su PIN) puede conceder acceso
+  const yo = (usuarioLogueado || '').trim().toLowerCase();
+  if (o !== yo && !esAdmin && !permisoVerificado) {
+    console.warn(`[Seguridad] Acceso denegado: "${yo}" no tiene autorización para conceder acceso al horario de "${owner}".`);
+    return false;
+  }
 
   if (!mapaPermisosCalendarios[o]) mapaPermisosCalendarios[o] = new Set();
   mapaPermisosCalendarios[o].add(v);
@@ -2514,8 +2564,6 @@ async function comprobarParametroCompartirHorarioUrl() {
       const ownerLimpio = ownerParam.trim();
       const yo = (usuarioLogueado || 'Cule').trim();
       
-      await concederPermisoCalendario(ownerLimpio, yo);
-
       // Limpiar URL sin recargar la página
       const url = new URL(window.location);
       url.searchParams.delete('compartir_horario_de');
@@ -2523,12 +2571,29 @@ async function comprobarParametroCompartirHorarioUrl() {
       url.searchParams.delete('horario_de');
       window.history.replaceState({}, document.title, url.toString());
 
-      if (typeof confetti === 'function') confetti({ particleCount: 60, spread: 80 });
-      alert(`🎉 ¡"${ownerLimpio}" ha compartido su horario contigo!\nAhora tienes acceso para ver sus turnos en el cuadrante.`);
+      // Verificación de seguridad: no auto-conceder permisos sin autorización del propietario
+      const yaAutorizado = tienePermisoCalendario(ownerLimpio, yo) || (ownerLimpio.toLowerCase() === yo.toLowerCase());
 
-      miUsuario = ownerLimpio;
-      if (selectorUsuario) selectorUsuario.value = miUsuario;
-      iniciarCalendario();
+      if (yaAutorizado) {
+        if (typeof confetti === 'function') confetti({ particleCount: 50, spread: 70 });
+        alert(`📅 Visualizando el cuadrante de "${ownerLimpio}" (Acceso concedido).`);
+        miUsuario = ownerLimpio;
+        if (selectorUsuario) selectorUsuario.value = miUsuario;
+        iniciarCalendario();
+      } else {
+        // Si no está previamente autorizado, solicitar el PIN de autorización del dueño
+        const pass = prompt(`🔒 Acceso Protegido\n\n"${ownerLimpio}" no te ha otorgado acceso previo a su horario.\nIntroduce la clave de acceso de "${ownerLimpio}" para visualizarlo:`);
+        if (pass && await verificarContrasenaUsuario(ownerLimpio, pass)) {
+          await concederPermisoCalendario(ownerLimpio, yo, true);
+          if (typeof confetti === 'function') confetti({ particleCount: 60, spread: 80 });
+          alert(`🎉 ¡Clave correcta! Has obtenido acceso al horario de "${ownerLimpio}".`);
+          miUsuario = ownerLimpio;
+          if (selectorUsuario) selectorUsuario.value = miUsuario;
+          iniciarCalendario();
+        } else if (pass !== null) {
+          alert(`❌ Clave incorrecta. Por privacidad, no puedes ver el horario de "${ownerLimpio}".`);
+        }
+      }
     }
   } catch (e) {}
 }
@@ -3079,8 +3144,9 @@ async function renderizarMes() {
       btnDesbloquear.addEventListener('click', async () => {
         const pass = (inputPass.value || '').trim();
         if (!pass) return alert(`Por favor, introduce la contraseña de "${miUsuario}".`);
-        if (verificarContrasenaUsuario(miUsuario, pass)) {
-          await concederPermisoCalendario(miUsuario, usuarioLogueado);
+        const ok = await verificarContrasenaUsuario(miUsuario, pass);
+        if (ok) {
+          await concederPermisoCalendario(miUsuario, usuarioLogueado, true);
           if (typeof confetti === 'function') confetti({ particleCount: 50, spread: 70 });
           alert(`🎉 ¡Contraseña correcta! Horario de "${miUsuario}" desbloqueado en modo lectura.`);
           iniciarCalendario();
@@ -3258,8 +3324,9 @@ async function renderizarAno() {
       btnDesbloquearAno.addEventListener('click', async () => {
         const pass = (inputPassAno.value || '').trim();
         if (!pass) return alert(`Por favor, introduce la contraseña de "${miUsuario}".`);
-        if (verificarContrasenaUsuario(miUsuario, pass)) {
-          await concederPermisoCalendario(miUsuario, usuarioLogueado);
+        const ok = await verificarContrasenaUsuario(miUsuario, pass);
+        if (ok) {
+          await concederPermisoCalendario(miUsuario, usuarioLogueado, true);
           if (typeof confetti === 'function') confetti({ particleCount: 50, spread: 70 });
           alert(`🎉 ¡Contraseña correcta! Horario de "${miUsuario}" desbloqueado en modo lectura.`);
           iniciarCalendario();
@@ -4399,9 +4466,17 @@ async function suscribirWebPushDispositivo() {
 
 async function enviarAvisoPushServidor(titulo, mensaje, url = '/') {
   try {
+    let authHeaders = { 'Content-Type': 'application/json' };
+    try {
+      const { data: { session } } = await supabaseApp.auth.getSession();
+      if (session?.access_token) {
+        authHeaders['Authorization'] = `Bearer ${session.access_token}`;
+      }
+    } catch(e) {}
+
     await fetch('/api/send-push', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders,
       body: JSON.stringify({
         title: titulo,
         body: mensaje,
@@ -5504,10 +5579,11 @@ function inicializarModoUniversitarioPerfil() {
       btnUbiUniv.classList.toggle('activo', ubicacionSeleccionada === 'universidad');
     }
 
-    // Cargar clave actual del usuario en la tarjeta de contraseña
+    // Configurar campo de contraseña en la tarjeta de perfil sin exponer texto plano
     const inputMiPass = document.getElementById('input-mi-password-perfil');
     if (inputMiPass) {
-      inputMiPass.value = obtenerContrasenaUsuario(usuarioABuscar);
+      inputMiPass.value = '';
+      inputMiPass.placeholder = '•••••••• (escribe nueva clave si deseas cambiarla)';
     }
   }
 
