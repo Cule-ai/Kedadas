@@ -5083,7 +5083,7 @@ if (btnAnalizarFoto) {
     let resultado = null;
     let ultimoErrorDetalle = '';
 
-    // LLAMADA EXCLUSIVA A LA FUNCIÓN SERVERLESS (/api/analizar-cuadrante)
+    // 1. Intentar primero con la función serverless (/api/analizar-cuadrante) si está disponible en Vercel
     try {
       scanStatusSub.textContent = `Extrayendo turnos para ${usuarioObjetivo} con Gemini Vision...`;
       const resServidor = await fetch('/api/analizar-cuadrante', {
@@ -5112,14 +5112,42 @@ if (btnAnalizarFoto) {
         ultimoErrorDetalle = errJson.message || errJson.error || `Error ${resServidor.status}`;
       }
     } catch (errServ) {
-      console.warn('Fallo consulta a /api/analizar-cuadrante:', errServ);
+      console.warn('Fallo consulta a /api/analizar-cuadrante (modo servidor no disponible o entorno local):', errServ);
       ultimoErrorDetalle = errServ.message;
+    }
+
+    // 2. FALLBACK HÍBRIDO INTELIGENTE: Si el backend no existe (ej. localhost:8080 o PWA) o falló, procesar directamente en el navegador
+    if (!resultado) {
+      if (claveGeminiLocal) {
+        try {
+          scanStatusSub.textContent = `Procesando directamente en tu navegador con Google Gemini Vision...`;
+          resultado = await llamarGeminiVisionNavegador(
+            claveGeminiLocal,
+            imagenBase64Actual,
+            mimeTypeActual,
+            modoSeleccionado,
+            usuarioObjetivo,
+            mesSeleccionado,
+            anoSeleccionado
+          );
+        } catch (errNavegador) {
+          console.warn('Fallo llamada directa a Gemini desde el navegador:', errNavegador);
+          ultimoErrorDetalle = errNavegador.message;
+        }
+      } else {
+        // Si no hay servidor disponible ni clave guardada en el navegador, guiar al usuario
+        scanLoadingState.style.display = 'none';
+        btnAnalizarFoto.style.display = 'inline-block';
+        if (boxConfigIA) boxConfigIA.style.display = 'block';
+        alert(`ℹ️ Para analizar cuadrantes en local (localhost:8080):\n\nConfigura tu clave gratuita de Google Gemini en el panel "⚙️ Clave IA" que se acaba de abrir.\n\nPuedes conseguir tu clave gratuita en 30 segundos en aistudio.google.com/app/apikey.`);
+        return;
+      }
     }
 
     if (!resultado) {
       scanLoadingState.style.display = 'none';
       btnAnalizarFoto.style.display = 'inline-block';
-      alert(`❌ No se pudo analizar el cuadrante en el servidor:\n${ultimoErrorDetalle || 'Comprueba la legibilidad de la imagen o configura GEMINI_API_KEY en las variables de Vercel.'}`);
+      alert(`❌ No se pudo analizar el cuadrante:\n${ultimoErrorDetalle || 'Comprueba la legibilidad de la imagen o tu clave de Gemini.'}`);
       return;
     }
 
