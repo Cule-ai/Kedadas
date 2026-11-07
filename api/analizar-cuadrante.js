@@ -106,7 +106,10 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO ADICIONAL):
           const url = `https://generativelanguage.googleapis.com/${vApi}/models/${modelo}:generateContent?key=${geminiKey}`;
           const geminiRes = await fetch(url, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+              'Content-Type': 'application/json',
+              'x-goog-api-key': geminiKey
+            },
             body: JSON.stringify({
               contents: [{
                 parts: [

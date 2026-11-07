@@ -5066,7 +5066,10 @@ if (btnProbarGeminiKey && inputGeminiKey) {
             const url = `https://generativelanguage.googleapis.com/${vApi}/models/${modelo}:generateContent?key=${clave}`;
             const res = await fetch(url, {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 
+                'Content-Type': 'application/json',
+                'x-goog-api-key': clave
+              },
               body: JSON.stringify({
                 contents: [{ parts: [{ text: 'Di únicamente: OK' }] }]
               })
@@ -5394,7 +5397,10 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO NI MARKDOWN):
         const url = `https://generativelanguage.googleapis.com/${vApi}/models/${modelo}:generateContent?key=${cleanKey}`;
         const res = await fetch(url, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'x-goog-api-key': cleanKey
+          },
           body: JSON.stringify({
             contents: [{
               parts: [
