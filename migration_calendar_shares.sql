@@ -81,31 +81,30 @@ create policy "calendar_shares_delete" on public.calendar_shares for delete to a
     or auth.uid() is null
   );
 
--- 6. Actualizar política de lectura en la tabla "Turnos"
+-- 6. Actualizar políticas completas en la tabla "Turnos" (Lectura y Guardado para todos los miembros)
+alter table public."Turnos" enable row level security;
+alter table public."Turnos" force row level security;
+
+drop policy if exists "turnos_select_all" on public."Turnos";
 drop policy if exists "turnos_select_strict" on public."Turnos";
-create policy "turnos_select_strict" on public."Turnos" for select to anon, authenticated
-  using (
-    public.is_superadmin()
-    or usuario_id = auth.uid()
-    or lower(usuario) = lower(coalesce(
-      (auth.jwt()::jsonb -> 'user_metadata' ->> 'nombre'),
-      split_part(coalesce((auth.jwt()::jsonb ->> 'email'), ''), '@', 1)
-    ))
-    or usuario in (select p.nombre from public.perfiles p where p.user_id = auth.uid())
-    or exists (
-      select 1 from public.calendar_shares cs
-      where lower(cs.owner_name) = lower(public."Turnos".usuario)
-        and (
-          lower(cs.granted_to) = lower(coalesce(
-            (auth.jwt()::jsonb -> 'user_metadata' ->> 'nombre'),
-            split_part(coalesce((auth.jwt()::jsonb ->> 'email'), ''), '@', 1)
-          ))
-          or cs.granted_to in (select p.nombre from public.perfiles p where p.user_id = auth.uid())
-          or cs.granted_to_id = auth.uid()
-        )
-    )
-    or auth.uid() is null
-  );
+create policy "turnos_select_all" on public."Turnos" for select to anon, authenticated
+  using (true);
+
+drop policy if exists "turnos_insert_all" on public."Turnos";
+drop policy if exists "turnos_insert_own" on public."Turnos";
+create policy "turnos_insert_all" on public."Turnos" for insert to anon, authenticated
+  with check (length(trim(usuario)) > 0);
+
+drop policy if exists "turnos_update_all" on public."Turnos";
+drop policy if exists "turnos_update_own" on public."Turnos";
+create policy "turnos_update_all" on public."Turnos" for update to anon, authenticated
+  using (length(trim(usuario)) > 0)
+  with check (length(trim(usuario)) > 0);
+
+drop policy if exists "turnos_delete_all" on public."Turnos";
+drop policy if exists "turnos_delete_own" on public."Turnos";
+create policy "turnos_delete_all" on public."Turnos" for delete to anon, authenticated
+  using (length(trim(usuario)) > 0);
 
 -- 7. Asegurar columna pin_hash y ciudad_origen en perfiles
 alter table public.perfiles add column if not exists pin_hash text default 'c8713d32bc75965c40cfea07ef93f9dd985f348954e81b3f39f768a0da544b53';

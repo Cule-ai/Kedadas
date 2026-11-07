@@ -2620,12 +2620,13 @@ selectorUsuario.addEventListener('change', (e) => {
   iniciarCalendario();
 });
 
-// --- 5. LÓGICA DE TURNOS DUAL (SUPABASE + LOCAL STORAGE POR GRUPO) ---
+// --- 5. LÓGICA DE TURNOS DUAL (SUPABASE + LOCAL STORAGE POR USUARIO) ---
 async function guardarTurnoNube(dia, indiceEstado, mesAnioEspecifico = null) {
   const mesAnio = mesAnioEspecifico || `${fechaNavegacion.getFullYear()}-${fechaNavegacion.getMonth()}`;
+  const usuarioDestino = (miUsuario || usuarioLogueado || 'Cule').trim();
   
-  // 1. Guardar de inmediato en almacenamiento local para el grupo y usuario activo
-  const keyLocal = `kedadas_turnos_${grupoActivo}_${miUsuario}_${mesAnio}`;
+  // 1. Guardar de inmediato en almacenamiento local para el usuario activo
+  const keyLocal = `kedadas_turnos_${usuarioDestino}_${mesAnio}`;
   let turnosLocales = [];
   try {
     const raw = localStorage.getItem(keyLocal);
@@ -2636,16 +2637,34 @@ async function guardarTurnoNube(dia, indiceEstado, mesAnioEspecifico = null) {
   if (idx >= 0) {
     turnosLocales[idx].indiceEstado = indiceEstado;
   } else {
-    turnosLocales.push({ dia, usuario: miUsuario, indiceEstado, mes_anio: mesAnio });
+    turnosLocales.push({ dia, usuario: usuarioDestino, indiceEstado, mes_anio: mesAnio });
   }
   localStorage.setItem(keyLocal, JSON.stringify(turnosLocales));
 
+  // Guardar también en clave por grupo para compatibilidad
+  try {
+    localStorage.setItem(`kedadas_turnos_${grupoActivo}_${usuarioDestino}_${mesAnio}`, JSON.stringify(turnosLocales));
+  } catch(e) {}
+
+  // Guardar también en caché anual
+  const anio = mesAnio.split('-')[0];
+  const keyAno = `kedadas_turnos_ano_${usuarioDestino}_${anio}`;
+  try {
+    let turnosAno = [];
+    const rawAno = localStorage.getItem(keyAno);
+    if (rawAno) turnosAno = JSON.parse(rawAno);
+    const idxAno = turnosAno.findIndex(t => t.dia === dia && t.mes_anio === mesAnio);
+    if (idxAno >= 0) turnosAno[idxAno].indiceEstado = indiceEstado;
+    else turnosAno.push({ dia, usuario: usuarioDestino, indiceEstado, mes_anio: mesAnio });
+    localStorage.setItem(keyAno, JSON.stringify(turnosAno));
+  } catch(e) {}
+
   // 2. Guardar en Supabase
   try {
-    let { data: existentes } = await supabaseApp.from('Turnos')
+    let { data: existentes, error: errSel } = await supabaseApp.from('Turnos')
       .select('id')
       .eq('dia', dia)
-      .eq('usuario', miUsuario)
+      .eq('usuario', usuarioDestino)
       .eq('mes_anio', mesAnio);
 
     if (existentes && existentes.length > 0) {
@@ -2653,7 +2672,7 @@ async function guardarTurnoNube(dia, indiceEstado, mesAnioEspecifico = null) {
     } else {
       await supabaseApp.from('Turnos').insert({
         dia: dia,
-        usuario: miUsuario,
+        usuario: usuarioDestino,
         usuario_id: miUserId,
         indiceEstado: indiceEstado,
         mes_anio: mesAnio
