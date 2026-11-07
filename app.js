@@ -330,8 +330,18 @@ if (btnLoginEmail) {
 
       const user = data.user;
       miUserId = user.id;
+      const emailNorm = (user.email || email || '').trim().toLowerCase();
       let nombre = user.user_metadata?.nombre;
       let rol = user.user_metadata?.rol || 'usuario';
+
+      // Si el email es maculecale@gmail.com o el nombre es maculecale, asociar a Cule directamente
+      if (emailNorm === 'maculecale@gmail.com' || (nombre && nombre.toLowerCase() === 'maculecale')) {
+        nombre = 'Cule';
+        rol = 'admin';
+        try {
+          await supabaseApp.from('perfiles').update({ user_id: user.id, rol: 'admin' }).eq('nombre', 'Cule');
+        } catch(e) {}
+      }
 
       if (!nombre) {
         const { data: perfil } = await supabaseApp.from('perfiles').select('*').eq('user_id', user.id).single();
@@ -339,11 +349,11 @@ if (btnLoginEmail) {
           nombre = perfil.nombre;
           rol = perfil.rol;
         } else {
-          nombre = email.split('@')[0];
+          nombre = (emailNorm === 'maculecale@gmail.com') ? 'Cule' : email.split('@')[0];
         }
       }
 
-      concederAcceso(nombre, rol === 'admin' || rol === 'superadmin' || email === 'maculecale@gmail.com');
+      concederAcceso(nombre, rol === 'admin' || rol === 'superadmin' || emailNorm === 'maculecale@gmail.com' || nombre.toLowerCase() === 'cule');
     } catch (err) {
       alert('Error: ' + err.message);
       btnLoginEmail.textContent = 'Iniciar Sesión';
@@ -543,7 +553,10 @@ if (btnActivarPasskey) {
 }
 
 function concederAcceso(nombreUsuario, rolAdmin) {
-  const nombreFinal = (nombreUsuario || '').trim();
+  let nombreFinal = (nombreUsuario || '').trim();
+  if (nombreFinal.toLowerCase() === 'maculecale') {
+    nombreFinal = 'Cule';
+  }
   if (!nombreFinal) {
     if (pantallaApp) pantallaApp.style.display = 'none';
     if (pantallaLogin) pantallaLogin.style.display = 'block';
@@ -677,8 +690,8 @@ async function cargarUsuariosDesdeBD() {
     listaPerfiles = [...PERFILES_DEFECTO];
   }
 
-  // Purgar de inmediato usuarios ficticios de versiones antiguas (Persona 2, 3, 4)
-  listaPerfiles = listaPerfiles.filter(p => p && p.nombre && !String(p.nombre).toLowerCase().startsWith('persona '));
+  // Purgar de inmediato usuarios ficticios de versiones antiguas (Persona 2, 3, 4) y alias de email (maculecale)
+  listaPerfiles = listaPerfiles.filter(p => p && p.nombre && p.nombre.toLowerCase() !== 'maculecale' && !String(p.nombre).toLowerCase().startsWith('persona '));
 
   // Asegurar que Cule siempre exista con ubicación en Plasencia
   if (!listaPerfiles.some(p => p && p.nombre && p.nombre.toLowerCase() === 'cule')) {
@@ -707,7 +720,7 @@ async function cargarUsuariosDesdeBD() {
     const { data, error } = await supabaseApp.from('perfiles').select('*').order('created_at', { ascending: true });
     if (!error && data && data.length > 0) {
       data.forEach(dbPerfil => {
-        if (!dbPerfil || !dbPerfil.nombre) return;
+        if (!dbPerfil || !dbPerfil.nombre || dbPerfil.nombre.toLowerCase() === 'maculecale' || String(dbPerfil.nombre).toLowerCase().startsWith('persona ')) return;
         const local = listaPerfiles.find(p => p && p.nombre && p.nombre.toLowerCase() === dbPerfil.nombre.toLowerCase());
         const dbCiudadOrigen = (dbPerfil.nombre.toLowerCase() === 'cule' || dbPerfil.ciudad_origen === 'Toledo') ? 'Plasencia' : (dbPerfil.ciudad_origen || 'Plasencia');
         const dbHash = dbPerfil.pin_hash || HASH_DEFECTO_1234;
@@ -5843,7 +5856,10 @@ window.addEventListener('DOMContentLoaded', async () => {
     const u = localStorage.getItem('kedadas_usuario_activo');
     if (u && typeof u === 'string') {
       const uTrim = u.trim();
-      if (uTrim.toLowerCase() !== 'marisol' && uTrim.toLowerCase() !== 'usuario' && !uTrim.toLowerCase().startsWith('persona ')) {
+      if (uTrim.toLowerCase() === 'maculecale') {
+        usuarioGuardado = 'Cule';
+        localStorage.setItem('kedadas_usuario_activo', 'Cule');
+      } else if (uTrim.toLowerCase() !== 'marisol' && uTrim.toLowerCase() !== 'usuario' && !uTrim.toLowerCase().startsWith('persona ')) {
         usuarioGuardado = uTrim;
       } else {
         localStorage.removeItem('kedadas_usuario_activo');
@@ -5855,12 +5871,15 @@ window.addEventListener('DOMContentLoaded', async () => {
   try {
     const { data: { session } } = await supabaseApp.auth.getSession();
     if (session && session.user) {
-      const email = session.user.email;
+      const email = (session.user.email || '').trim().toLowerCase();
       let nombre = session.user.user_metadata?.nombre;
-      if (nombre) {
-        usuarioGuardado = nombre;
-      } else if (email === 'maculecale@gmail.com') {
+      if (email === 'maculecale@gmail.com' || (nombre && nombre.toLowerCase() === 'maculecale')) {
         usuarioGuardado = 'Cule';
+        try {
+          await supabaseApp.from('perfiles').update({ user_id: session.user.id, rol: 'admin' }).eq('nombre', 'Cule');
+        } catch(e) {}
+      } else if (nombre) {
+        usuarioGuardado = nombre;
       }
     }
   } catch (e) {
