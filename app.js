@@ -2067,7 +2067,16 @@ function cambiarGrupo(nuevoGrupo) {
   const nombreLimpio = (typeof nuevoGrupo === 'string' ? nuevoGrupo : (nuevoGrupo.nombre || nuevoGrupo.name || '')).trim();
   if (!nombreLimpio) return;
 
-  const g = (listaGrupos || []).find(item => obtenerNombreGrupo(item).toLowerCase() === nombreLimpio.toLowerCase());
+  // Comprobar autorización: solo puede cambiar a grupos donde es creador o miembro invitado
+  const visibles = (typeof obtenerGruposVisibles === 'function') ? obtenerGruposVisibles(usuarioLogueado) : [];
+  const gPermitido = visibles.find(item => obtenerNombreGrupo(item).toLowerCase() === nombreLimpio.toLowerCase());
+
+  if (!esAdmin && !gPermitido && visibles.length > 0) {
+    console.warn(`Acceso restringido: ${usuarioLogueado} no pertenece al grupo "${nombreLimpio}".`);
+    return;
+  }
+
+  const g = gPermitido || (listaGrupos || []).find(item => obtenerNombreGrupo(item).toLowerCase() === nombreLimpio.toLowerCase());
 
   try {
     if (Object.keys(cambiosHorarioPendientes).length > 0) {
@@ -2086,15 +2095,8 @@ function cambiarGrupo(nuevoGrupo) {
     localStorage.setItem('kedadas_grupo_activo', grupoActivo);
   } catch(e) {}
 
-  // Sincronizar miembros del nuevo grupo
+  // Obtener miembros del grupo
   const miembrosNuevo = obtenerMiembrosGrupo(grupoActivo);
-  if (usuarioLogueado && !miembrosNuevo.some(m => String(m || '').toLowerCase() === usuarioLogueado.toLowerCase())) {
-    miembrosNuevo.push(usuarioLogueado);
-    if (g && Array.isArray(g.miembros)) {
-      g.miembros.push(usuarioLogueado);
-      sincronizarGrupoEnSupabase(g);
-    }
-  }
 
   if (miembrosNuevo.includes(usuarioLogueado)) {
     miUsuario = usuarioLogueado;
