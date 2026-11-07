@@ -543,7 +543,12 @@ if (btnActivarPasskey) {
 }
 
 function concederAcceso(nombreUsuario, rolAdmin) {
-  const nombreFinal = (nombreUsuario || 'Cule').trim();
+  const nombreFinal = (nombreUsuario || '').trim();
+  if (!nombreFinal) {
+    if (pantallaApp) pantallaApp.style.display = 'none';
+    if (pantallaLogin) pantallaLogin.style.display = 'block';
+    return;
+  }
   const esCule = (nombreFinal.toLowerCase() === 'cule');
   usuarioLogueado = nombreFinal; 
   miUsuario = nombreFinal; 
@@ -1676,7 +1681,39 @@ function puedeUsuarioVerGrupo(g, usuario) {
 }
 
 function obtenerGruposVisibles(usuario) {
-  return (listaGrupos || []).map(g => normalizarGrupo(g)).filter(Boolean);
+  const yo = (usuario || usuarioLogueado || '').trim().toLowerCase();
+  if (!yo) return [];
+
+  // Filtrar estrictamente: cada usuario solo ve los grupos donde es creador o miembro
+  let visibles = (listaGrupos || []).map(g => normalizarGrupo(g)).filter(g => {
+    if (!g) return false;
+    const creador = (g.creador || '').trim().toLowerCase();
+    const esCreador = (creador === yo);
+    const esMiembro = Array.isArray(g.miembros) && g.miembros.some(m => String(m).trim().toLowerCase() === yo);
+    return esCreador || esMiembro;
+  });
+
+  // Si el usuario es nuevo y aún no tiene ningún grupo, crearle su propio grupo inicial personal en blanco
+  if (visibles.length === 0 && usuarioLogueado) {
+    const miGrupoInicial = {
+      id: `grupo-${usuarioLogueado.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}`,
+      nombre: `Mis Turnos`,
+      icono: '📅',
+      creador: usuarioLogueado,
+      miembros: [usuarioLogueado],
+      codigo_acceso: generarCodigoAcceso('Mis Turnos'),
+      descripcion: `Cuadrante personal de ${usuarioLogueado}`
+    };
+    listaGrupos.push(miGrupoInicial);
+    try {
+      localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos));
+      sincronizarGrupoEnSupabase(miGrupoInicial);
+    } catch(e) {}
+    visibles.push(miGrupoInicial);
+    grupoActivo = 'Mis Turnos';
+  }
+
+  return visibles;
 }
 
 function esAdminDelGrupo(g, usuario) {
@@ -1694,14 +1731,10 @@ function obtenerMiembrosGrupo(grupoNombre) {
   if (g) {
     const norm = normalizarGrupo(g);
     if (norm && Array.isArray(norm.miembros) && norm.miembros.length > 0) {
-      return norm.miembros;
+      return norm.miembros.filter(m => m && !String(m).toLowerCase().startsWith('persona '));
     }
   }
-  const def = GRUPOS_DEFECTO.find(d => (d.id || '').toLowerCase() === nombreTarget || obtenerNombreGrupo(d).toLowerCase() === nombreTarget);
-  if (def && Array.isArray(def.miembros) && def.miembros.length > 0) {
-    return [...def.miembros];
-  }
-  return (Array.isArray(usuarios) && usuarios.length > 0) ? [...usuarios] : ['Cule'];
+  return usuarioLogueado ? [usuarioLogueado] : ['Cule'];
 }
 
 function actualizarBannerGrupo() {
@@ -4645,6 +4678,21 @@ if ('serviceWorker' in navigator) {
     try {
       swRegistration = await navigator.serviceWorker.register('./sw.js');
       console.log('✅ Service Worker registrado con éxito:', swRegistration.scope);
+      // Forzar verificación de actualizaciones para que móviles no se queden con código viejo
+      if (swRegistration) {
+        swRegistration.update();
+        swRegistration.addEventListener('updatefound', () => {
+          const newWorker = swRegistration.installing;
+          if (newWorker) {
+            newWorker.addEventListener('statechange', () => {
+              if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                console.log('🚀 Nueva versión de Kedadas instalada. Actualizando...');
+                window.location.reload();
+              }
+            });
+          }
+        });
+      }
     } catch (err) {
       console.warn('No se pudo registrar el Service Worker:', err);
     }
