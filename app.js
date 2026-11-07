@@ -79,7 +79,7 @@ const supabaseApp = supabase.createClient(supabaseUrl, supabaseKey);
 
 // --- 2. SISTEMA DE LOGIN Y SUPABASE AUTH (DUAL PIN / CORREO) ---
 const EMAILS_ADMIN_CULE = ['maculecale@gmail.com', 'maculebras@hotmail.com'];
-const ALIASES_CULE = ['cule', 'maculecale', 'maculebras'];
+const ALIASES_CULE = ['cule', 'maculecale', 'maculebras', 'maculecale@gmail.com', 'maculebras@hotmail.com'];
 
 function esAdminCule(email, nombre) {
   const e = String(email || '').trim().toLowerCase();
@@ -1687,6 +1687,13 @@ function normalizarGrupo(g) {
       miembros = [g.creador || usuarioLogueado || 'Cule'];
     }
   }
+
+  // Filtrar y deduplicar miembros: unificar alias y correos de Cule a 'Cule' y eliminar mockups
+  miembros = miembros
+    .filter(m => m && !String(m).toLowerCase().startsWith('persona '))
+    .map(m => (ALIASES_CULE.includes(String(m).trim().toLowerCase()) ? 'Cule' : String(m).trim()));
+  miembros = Array.from(new Set(miembros));
+
   const creador = g.creador || (['Amigos', 'Familia', 'Pareja', 'Hijos'].includes(nombre) ? 'Cule' : (usuarioLogueado || 'Cule'));
   const codigo = g.codigo_acceso || generarCodigoAcceso(nombre);
   return {
@@ -1878,10 +1885,13 @@ async function cargarGruposDesdeBD() {
     }
   }
 
-  // Limpiar miembros residuales 'Persona 2, 3, 4' de cualquier grupo
+  // Limpiar miembros residuales 'Persona 2, 3, 4' y unificar correos/alias de Cule
   listaGrupos.forEach(g => {
     if (g && Array.isArray(g.miembros)) {
-      g.miembros = g.miembros.filter(m => m && !String(m).toLowerCase().startsWith('persona '));
+      g.miembros = g.miembros
+        .filter(m => m && !String(m).toLowerCase().startsWith('persona '))
+        .map(m => (ALIASES_CULE.includes(String(m).trim().toLowerCase()) ? 'Cule' : String(m).trim()));
+      g.miembros = Array.from(new Set(g.miembros));
       if (g.miembros.length === 0) g.miembros = ['Cule'];
     }
   });
