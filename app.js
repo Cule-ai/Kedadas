@@ -5509,7 +5509,7 @@ if (btnAnalizarFoto) {
         scanLoadingState.style.display = 'none';
         btnAnalizarFoto.style.display = 'inline-block';
         if (boxConfigIA) boxConfigIA.style.display = 'block';
-        alert(`ℹ️ Para analizar cuadrantes en local (localhost:8080):\n\nConfigura tu clave gratuita de Google Gemini en el panel "⚙️ Clave IA" que se acaba de abrir.\n\nPuedes conseguir tu clave gratuita en 30 segundos en aistudio.google.com/app/apikey.`);
+        alert(`ℹ️ Para escanear cuadrantes con Inteligencia Artificial:\n\nConfigura tu clave gratuita de Google Gemini en el panel "⚙️ Clave IA" que se acaba de abrir.\n\nPuedes conseguir tu clave gratuita en 30 segundos en aistudio.google.com/app/apikey.`);
         return;
       }
     }
