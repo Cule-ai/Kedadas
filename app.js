@@ -747,7 +747,7 @@ async function cargarUsuariosDesdeBD() {
         const dbCiudadOrigen = (dbPerfil.nombre.toLowerCase() === 'cule' || dbPerfil.ciudad_origen === 'Toledo') ? 'Plasencia' : (dbPerfil.ciudad_origen || 'Plasencia');
         const dbHash = dbPerfil.pin_hash || HASH_DEFECTO_1234;
         if (local) {
-          if (dbPerfil.rol) local.rol = dbPerfil.rol;
+          local.rol = (dbPerfil.nombre.toLowerCase() === 'cule' ? 'admin' : 'usuario');
           if (dbPerfil.es_universitario !== undefined) local.es_universitario = dbPerfil.es_universitario;
           local.ciudad_origen = dbCiudadOrigen;
           if (dbPerfil.ciudad_universidad) local.ciudad_universidad = dbPerfil.ciudad_universidad;
@@ -758,7 +758,7 @@ async function cargarUsuariosDesdeBD() {
           listaPerfiles.push({
             id: dbPerfil.id || dbPerfil.nombre,
             nombre: dbPerfil.nombre,
-            rol: dbPerfil.rol || 'usuario',
+            rol: (dbPerfil.nombre.toLowerCase() === 'cule' ? 'admin' : 'usuario'),
             es_universitario: !!dbPerfil.es_universitario,
             ciudad_origen: dbCiudadOrigen,
             ciudad_universidad: dbPerfil.ciudad_universidad || '',
@@ -767,17 +767,26 @@ async function cargarUsuariosDesdeBD() {
           });
         }
       });
+      // Asegurar que exclusivamente Cule tenga rol admin en listaPerfiles
+      listaPerfiles.forEach(p => {
+        if (!p || !p.nombre) return;
+        p.rol = p.nombre.toLowerCase() === 'cule' ? 'admin' : 'usuario';
+        if (p.nombre.toLowerCase() === 'cule') p.ciudad_origen = 'Plasencia';
+      });
       guardarPerfilesLocales();
     }
   } catch (err) {
     console.warn('Aviso sincronización Supabase perfiles:', err);
   }
 
-  // Sincronizar actualización de Plasencia en Supabase
+  // Sincronizar actualización de roles y Plasencia en Supabase
   try {
     await supabaseApp.from('perfiles')
-      .update({ ciudad_origen: 'Plasencia' })
+      .update({ rol: 'admin', ciudad_origen: 'Plasencia' })
       .or('ciudad_origen.eq.Toledo,nombre.ilike.cule');
+    await supabaseApp.from('perfiles')
+      .update({ rol: 'usuario' })
+      .neq('nombre', 'Cule');
   } catch(e) {}
 
   try { renderizarSelectoresUsuarios(); } catch(e) { console.warn(e); }
@@ -1174,7 +1183,7 @@ function renderizarPanelGestionUsuarios() {
     avatar.className = 'user-avatar-initial';
     avatar.textContent = (p.nombre || '?').charAt(0).toUpperCase();
 
-    const esAdminPerfil = (p.nombre && p.nombre.toLowerCase() === 'cule') || p.rol === 'admin';
+    const esAdminPerfil = Boolean(p.nombre && p.nombre.toLowerCase() === 'cule');
     const textWrap = document.createElement('div');
     textWrap.innerHTML = `
       <div class="user-name-text">${escapeHtml(p.nombre)}</div>
@@ -1902,7 +1911,15 @@ async function cargarGruposDesdeBD() {
   });
 
   localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos));
-  renderizarSelectorGrupos();
+
+  // Sincronizar en segundo plano la lista limpia a Supabase para purgar alias residuales
+  listaGrupos.forEach(async g => {
+    try {
+      if (g && g.id) {
+        await supabaseApp.from('grupos').update({ miembros: JSON.stringify(g.miembros) }).eq('id', g.id);
+      }
+    } catch(e) {}
+  });
   renderizarPanelGestionGrupoActivo();
   actualizarBannerGrupo();
   renderizarSelectoresUsuarios();
