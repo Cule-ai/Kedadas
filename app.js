@@ -78,6 +78,15 @@ const supabaseKey = 'sb_publishable_S7NTo7XKekBigTm8U17rQA_u2Cp0SrI';
 const supabaseApp = supabase.createClient(supabaseUrl, supabaseKey);
 
 // --- 2. SISTEMA DE LOGIN Y SUPABASE AUTH (DUAL PIN / CORREO) ---
+const EMAILS_ADMIN_CULE = ['maculecale@gmail.com', 'maculebras@hotmail.com'];
+const ALIASES_CULE = ['cule', 'maculecale', 'maculebras'];
+
+function esAdminCule(email, nombre) {
+  const e = String(email || '').trim().toLowerCase();
+  const n = String(nombre || '').trim().toLowerCase();
+  return EMAILS_ADMIN_CULE.includes(e) || ALIASES_CULE.includes(n);
+}
+
 let usuarioLogueado = ''; 
 let miUsuario = '';
 let miUserId = null;
@@ -334,8 +343,8 @@ if (btnLoginEmail) {
       let nombre = user.user_metadata?.nombre;
       let rol = user.user_metadata?.rol || 'usuario';
 
-      // Si el email es maculecale@gmail.com o el nombre es maculecale, asociar a Cule directamente
-      if (emailNorm === 'maculecale@gmail.com' || (nombre && nombre.toLowerCase() === 'maculecale')) {
+      // Si el email es de Cule o el nombre es un alias, asociar a Cule directamente
+      if (esAdminCule(emailNorm, nombre)) {
         nombre = 'Cule';
         rol = 'admin';
         try {
@@ -349,11 +358,16 @@ if (btnLoginEmail) {
           nombre = perfil.nombre;
           rol = perfil.rol;
         } else {
-          nombre = (emailNorm === 'maculecale@gmail.com') ? 'Cule' : email.split('@')[0];
+          nombre = esAdminCule(emailNorm, '') ? 'Cule' : email.split('@')[0];
         }
       }
 
-      concederAcceso(nombre, rol === 'admin' || rol === 'superadmin' || emailNorm === 'maculecale@gmail.com' || nombre.toLowerCase() === 'cule');
+      if (esAdminCule(emailNorm, nombre)) {
+        nombre = 'Cule';
+        rol = 'admin';
+      }
+
+      concederAcceso(nombre, rol === 'admin' || rol === 'superadmin' || esAdminCule(emailNorm, nombre));
     } catch (err) {
       alert('Error: ' + err.message);
       btnLoginEmail.textContent = 'Iniciar Sesión';
@@ -364,9 +378,13 @@ if (btnLoginEmail) {
 // Registro de nueva cuenta con Supabase Auth
 if (btnRegisterEmail) {
   btnRegisterEmail.addEventListener('click', async () => {
-    const nombre = (loginNombreReg ? loginNombreReg.value : '').trim();
+    let nombre = (loginNombreReg ? loginNombreReg.value : '').trim();
     const email = (loginEmail.value || '').trim();
     const password = loginPassword.value;
+
+    if (esAdminCule(email, nombre)) {
+      nombre = 'Cule';
+    }
 
     if (!nombre) return alert('Por favor, introduce tu nombre para el cuadrante.');
     if (!email || !password || password.length < 6) return alert('Introduce un correo y contraseña (mínimo 6 caracteres).');
@@ -376,7 +394,7 @@ if (btnRegisterEmail) {
       const { data, error } = await supabaseApp.auth.signUp({
         email,
         password,
-        options: { data: { nombre: nombre, rol: email === 'maculecale@gmail.com' ? 'superadmin' : 'usuario' } }
+        options: { data: { nombre: nombre, rol: esAdminCule(email, nombre) ? 'admin' : 'usuario' } }
       });
       btnRegisterEmail.textContent = 'Crear Cuenta';
 
@@ -385,7 +403,7 @@ if (btnRegisterEmail) {
       alert(`🎉 ¡Cuenta creada con éxito! Bienvenido/a, ${nombre}.`);
       if (data.session && data.user) {
         miUserId = data.user.id;
-        concederAcceso(nombre, email === 'maculecale@gmail.com');
+        concederAcceso(nombre, esAdminCule(email, nombre));
       } else {
         alert('Por favor, revisa tu correo electrónico para confirmar la cuenta antes de iniciar sesión.');
       }
@@ -554,7 +572,7 @@ if (btnActivarPasskey) {
 
 function concederAcceso(nombreUsuario, rolAdmin) {
   let nombreFinal = (nombreUsuario || '').trim();
-  if (nombreFinal.toLowerCase() === 'maculecale') {
+  if (ALIASES_CULE.includes(nombreFinal.toLowerCase())) {
     nombreFinal = 'Cule';
   }
   if (!nombreFinal) {
@@ -690,8 +708,8 @@ async function cargarUsuariosDesdeBD() {
     listaPerfiles = [...PERFILES_DEFECTO];
   }
 
-  // Purgar de inmediato usuarios ficticios de versiones antiguas (Persona 2, 3, 4) y alias de email (maculecale)
-  listaPerfiles = listaPerfiles.filter(p => p && p.nombre && p.nombre.toLowerCase() !== 'maculecale' && !String(p.nombre).toLowerCase().startsWith('persona '));
+  // Purgar de inmediato usuarios ficticios de versiones antiguas (Persona 2, 3, 4) y alias de email (maculecale, maculebras)
+  listaPerfiles = listaPerfiles.filter(p => p && p.nombre && !ALIASES_CULE.slice(1).includes(p.nombre.toLowerCase()) && !String(p.nombre).toLowerCase().startsWith('persona '));
 
   // Asegurar que Cule siempre exista con ubicación en Plasencia
   if (!listaPerfiles.some(p => p && p.nombre && p.nombre.toLowerCase() === 'cule')) {
@@ -720,7 +738,7 @@ async function cargarUsuariosDesdeBD() {
     const { data, error } = await supabaseApp.from('perfiles').select('*').order('created_at', { ascending: true });
     if (!error && data && data.length > 0) {
       data.forEach(dbPerfil => {
-        if (!dbPerfil || !dbPerfil.nombre || dbPerfil.nombre.toLowerCase() === 'maculecale' || String(dbPerfil.nombre).toLowerCase().startsWith('persona ')) return;
+        if (!dbPerfil || !dbPerfil.nombre || ALIASES_CULE.slice(1).includes(dbPerfil.nombre.toLowerCase()) || String(dbPerfil.nombre).toLowerCase().startsWith('persona ')) return;
         const local = listaPerfiles.find(p => p && p.nombre && p.nombre.toLowerCase() === dbPerfil.nombre.toLowerCase());
         const dbCiudadOrigen = (dbPerfil.nombre.toLowerCase() === 'cule' || dbPerfil.ciudad_origen === 'Toledo') ? 'Plasencia' : (dbPerfil.ciudad_origen || 'Plasencia');
         const dbHash = dbPerfil.pin_hash || HASH_DEFECTO_1234;
@@ -5856,7 +5874,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     const u = localStorage.getItem('kedadas_usuario_activo');
     if (u && typeof u === 'string') {
       const uTrim = u.trim();
-      if (uTrim.toLowerCase() === 'maculecale') {
+      if (ALIASES_CULE.includes(uTrim.toLowerCase())) {
         usuarioGuardado = 'Cule';
         localStorage.setItem('kedadas_usuario_activo', 'Cule');
       } else if (uTrim.toLowerCase() !== 'marisol' && uTrim.toLowerCase() !== 'usuario' && !uTrim.toLowerCase().startsWith('persona ')) {
@@ -5873,7 +5891,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (session && session.user) {
       const email = (session.user.email || '').trim().toLowerCase();
       let nombre = session.user.user_metadata?.nombre;
-      if (email === 'maculecale@gmail.com' || (nombre && nombre.toLowerCase() === 'maculecale')) {
+      if (esAdminCule(email, nombre)) {
         usuarioGuardado = 'Cule';
         try {
           await supabaseApp.from('perfiles').update({ user_id: session.user.id, rol: 'admin' }).eq('nombre', 'Cule');
