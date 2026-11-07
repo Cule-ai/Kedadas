@@ -716,12 +716,16 @@ async function cargarUsuariosDesdeBD() {
     listaPerfiles.unshift({ id: 'Cule', nombre: 'Cule', rol: 'admin', ciudad_origen: 'Plasencia', pin_hash: HASH_DEFECTO_1234 });
   }
 
-  // Forzar que Cule y perfiles residuales usen Plasencia y tengan pin_hash criptográfico
+  // Forzar que Cule sea siempre admin y Plasencia, y los demás usuarios regulares
   listaPerfiles.forEach(p => {
-    if (!p) return;
-    if (p.nombre && p.nombre.toLowerCase() === 'cule') {
+    if (!p || !p.nombre) return;
+    if (p.nombre.toLowerCase() === 'cule') {
+      p.rol = 'admin';
       p.ciudad_origen = 'Plasencia';
-    } else if (p.ciudad_origen === 'Toledo' || !p.ciudad_origen) {
+    } else {
+      p.rol = 'usuario';
+    }
+    if (p.ciudad_origen === 'Toledo' || !p.ciudad_origen) {
       p.ciudad_origen = 'Plasencia';
     }
     if (!p.pin_hash) {
@@ -1170,10 +1174,11 @@ function renderizarPanelGestionUsuarios() {
     avatar.className = 'user-avatar-initial';
     avatar.textContent = (p.nombre || '?').charAt(0).toUpperCase();
 
+    const esAdminPerfil = (p.nombre && p.nombre.toLowerCase() === 'cule') || p.rol === 'admin';
     const textWrap = document.createElement('div');
     textWrap.innerHTML = `
       <div class="user-name-text">${escapeHtml(p.nombre)}</div>
-      <span class="user-rol-tag ${p.rol === 'admin' ? 'rol-admin' : 'rol-user'}">${p.rol === 'admin' ? 'Admin' : 'Usuario'}</span>
+      <span class="user-rol-tag ${esAdminPerfil ? 'rol-admin' : 'rol-user'}">${esAdminPerfil ? 'Admin' : 'Usuario'}</span>
     `;
 
     info.appendChild(avatar);
