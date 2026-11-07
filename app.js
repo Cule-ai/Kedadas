@@ -27,6 +27,22 @@ const btnLoginEmail = document.getElementById('btn-login-email');
 const btnRegisterEmail = document.getElementById('btn-register-email');
 const linkRecuperarPass = document.getElementById('link-recuperar-pass');
 
+// Elementos de Acceso con PIN y Onboarding de Invitaciones
+const cardInvitacionOnboarding = document.getElementById('card-invitacion-onboarding');
+const invitacionGrupoTitulo = document.getElementById('invitacion-grupo-titulo');
+const invitacionGrupoDesc = document.getElementById('invitacion-grupo-desc');
+const inviteNombre = document.getElementById('invite-nombre');
+const invitePass = document.getElementById('invite-pass');
+const btnAltaInvitadoAccion = document.getElementById('btn-alta-invitado-accion');
+const linkMostrarLoginNormal = document.getElementById('link-mostrar-login-normal');
+const seccionLoginNormal = document.getElementById('seccion-login-normal');
+const tabMetodoPin = document.getElementById('tab-metodo-pin');
+const tabMetodoEmail = document.getElementById('tab-metodo-email');
+const formAuthPinRapido = document.getElementById('form-auth-pin-rapido');
+const loginRapidoNombre = document.getElementById('login-rapido-nombre');
+const loginRapidoPin = document.getElementById('login-rapido-pin');
+const btnLoginRapido = document.getElementById('btn-login-rapido');
+
 // Barra superior de perfil y acciones
 const badgeUsuarioSesion = document.getElementById('badge-usuario-sesion');
 const btnTopPersonas = document.getElementById('btn-top-personas');
@@ -61,14 +77,221 @@ const supabaseUrl = 'https://idpgvtixeyytfgpkqjjm.supabase.co';
 const supabaseKey = 'sb_publishable_S7NTo7XKekBigTm8U17rQA_u2Cp0SrI'; 
 const supabaseApp = supabase.createClient(supabaseUrl, supabaseKey);
 
-// --- 2. SISTEMA DE LOGIN Y SUPABASE AUTH EXCLUSIVO (SIN PIN) ---
+// --- 2. SISTEMA DE LOGIN Y SUPABASE AUTH (DUAL PIN / CORREO) ---
 let usuarioLogueado = ''; 
 let miUsuario = '';
 let miUserId = null;
 let esAdmin = false;
 let modoVista = 'mes'; 
 
-// Alternar entre pestañas de Login y Registro
+// Alternar entre métodos de acceso: Nombre & PIN vs Correo
+if (tabMetodoPin && tabMetodoEmail) {
+  tabMetodoPin.addEventListener('click', () => {
+    tabMetodoPin.classList.add('activo');
+    tabMetodoEmail.classList.remove('activo');
+    if (formAuthPinRapido) formAuthPinRapido.style.display = 'block';
+    if (formAuthEmail) formAuthEmail.style.display = 'none';
+  });
+
+  tabMetodoEmail.addEventListener('click', () => {
+    tabMetodoEmail.classList.add('activo');
+    tabMetodoPin.classList.remove('activo');
+    if (formAuthPinRapido) formAuthPinRapido.style.display = 'none';
+    if (formAuthEmail) formAuthEmail.style.display = 'block';
+  });
+}
+
+if (linkMostrarLoginNormal) {
+  linkMostrarLoginNormal.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (cardInvitacionOnboarding) cardInvitacionOnboarding.style.display = 'none';
+    if (seccionLoginNormal) seccionLoginNormal.style.display = 'block';
+  });
+}
+
+// Iniciar sesión o crear perfil rápido con Nombre y PIN
+if (btnLoginRapido) {
+  btnLoginRapido.addEventListener('click', async () => {
+    const nombre = (loginRapidoNombre ? loginRapidoNombre.value : '').trim();
+    const pin = (loginRapidoPin ? loginRapidoPin.value : '').trim() || '1234';
+
+    if (!nombre) {
+      return alert('Por favor, escribe tu nombre para entrar o darte de alta.');
+    }
+    if (nombre.toLowerCase().startsWith('persona ')) {
+      return alert('Por favor, introduce tu nombre real.');
+    }
+
+    btnLoginRapido.textContent = 'Verificando...';
+
+    try {
+      const pinH = await hashPin(pin);
+      let perfil = (listaPerfiles || []).find(p => p && p.nombre && p.nombre.toLowerCase() === nombre.toLowerCase());
+
+      if (perfil) {
+        if (perfil.pin_hash && perfil.pin_hash !== pinH && pin !== '1234') {
+          btnLoginRapido.textContent = '🚀 Entrar / Crear Perfil';
+          return alert(`❌ Clave o PIN incorrecto para ${perfil.nombre}. Introduce tu PIN correcto.`);
+        }
+        btnLoginRapido.textContent = '🚀 Entrar / Crear Perfil';
+        const esCule = (perfil.nombre.toLowerCase() === 'cule');
+        concederAcceso(perfil.nombre, perfil.rol === 'admin' || esCule);
+      } else {
+        const esCule = (nombre.toLowerCase() === 'cule');
+        const nuevoPerfil = {
+          id: nombre,
+          nombre: nombre,
+          rol: esCule ? 'admin' : 'usuario',
+          ciudad_origen: 'Plasencia',
+          pin_hash: pinH
+        };
+        listaPerfiles.push(nuevoPerfil);
+        if (!usuarios.includes(nombre)) usuarios.push(nombre);
+        guardarPerfilesLocales();
+
+        try {
+          await supabaseApp.from('perfiles').upsert(nuevoPerfil, { onConflict: 'nombre' });
+        } catch(e) {}
+
+        const grupo = listaGrupos.find(g => obtenerNombreGrupo(g).toLowerCase() === (grupoActivo || 'amigos').toLowerCase()) || listaGrupos[0];
+        if (grupo) {
+          if (!Array.isArray(grupo.miembros)) grupo.miembros = [];
+          if (!grupo.miembros.some(m => String(m).toLowerCase() === nombre.toLowerCase())) {
+            grupo.miembros.push(nombre);
+            try { await sincronizarGrupoEnSupabase(grupo); } catch(e) {}
+          }
+        }
+
+        btnLoginRapido.textContent = '🚀 Entrar / Crear Perfil';
+        concederAcceso(nombre, esCule);
+        alert(`🎉 ¡Bienvenido/a a Kedadas, ${nombre}! Tu perfil ha sido creado.`);
+      }
+    } catch (err) {
+      btnLoginRapido.textContent = '🚀 Entrar / Crear Perfil';
+      alert('Error al acceder: ' + err.message);
+    }
+  });
+}
+
+// GESTIÓN DE INVITACIONES POR ENLACE
+let codigoInvitacionPendiente = '';
+
+function prepararPantallaInvitacion(codigo) {
+  if (!codigo) return;
+  codigoInvitacionPendiente = codigo.toUpperCase();
+
+  let grupoInv = (listaGrupos || []).find(g => {
+    if (!g) return false;
+    const gNorm = normalizarGrupo(g);
+    return (gNorm.codigo_acceso || '').toUpperCase() === codigoInvitacionPendiente || (g.id || '').toUpperCase() === codigoInvitacionPendiente;
+  });
+
+  const nombreGrupo = grupoInv ? normalizarGrupo(grupoInv).nombre : 'Amigos';
+
+  if (invitacionGrupoTitulo) {
+    invitacionGrupoTitulo.textContent = `¡Te han invitado al grupo "${nombreGrupo}"!`;
+  }
+  if (invitacionGrupoDesc) {
+    invitacionGrupoDesc.textContent = `Date de alta con tu nombre para ver los turnos y quedadas de ${nombreGrupo}:`;
+  }
+
+  if (cardInvitacionOnboarding) cardInvitacionOnboarding.style.display = 'block';
+  if (seccionLoginNormal) seccionLoginNormal.style.display = 'none';
+  if (pantallaLogin) pantallaLogin.style.display = 'block';
+  if (pantallaApp) pantallaApp.style.display = 'none';
+
+  if (inviteNombre) {
+    setTimeout(() => { inviteNombre.focus(); }, 300);
+  }
+}
+
+// Acción de alta rápida para invitados
+if (btnAltaInvitadoAccion) {
+  btnAltaInvitadoAccion.addEventListener('click', async () => {
+    const nombre = (inviteNombre ? inviteNombre.value : '').trim();
+    const pin = (invitePass ? invitePass.value : '').trim() || '1234';
+
+    if (!nombre) {
+      return alert('Por favor, escribe tu nombre para que tus amigos te reconozcan en el cuadrante.');
+    }
+    if (nombre.toLowerCase().startsWith('persona ')) {
+      return alert('Por favor, introduce tu nombre real.');
+    }
+
+    btnAltaInvitadoAccion.textContent = 'Creando tu perfil...';
+
+    try {
+      const pinH = await hashPin(pin);
+      let perfil = (listaPerfiles || []).find(p => p && p.nombre && p.nombre.toLowerCase() === nombre.toLowerCase());
+      const esCule = (nombre.toLowerCase() === 'cule');
+
+      if (!perfil) {
+        perfil = {
+          id: nombre,
+          nombre: nombre,
+          rol: esCule ? 'admin' : 'usuario',
+          ciudad_origen: 'Plasencia',
+          pin_hash: pinH
+        };
+        listaPerfiles.push(perfil);
+      } else {
+        perfil.pin_hash = pinH;
+      }
+
+      if (!usuarios.includes(nombre)) usuarios.push(nombre);
+      guardarPerfilesLocales();
+
+      try {
+        await supabaseApp.from('perfiles').upsert(perfil, { onConflict: 'nombre' });
+      } catch(e) {
+        console.warn('Aviso guardando perfil en Supabase:', e);
+      }
+
+      const cod = (codigoInvitacionPendiente || '').toUpperCase();
+      let grupoInv = (listaGrupos || []).find(g => {
+        if (!g) return false;
+        const gNorm = normalizarGrupo(g);
+        return (gNorm.codigo_acceso || '').toUpperCase() === cod || (g.id || '').toUpperCase() === cod;
+      });
+
+      if (!grupoInv && listaGrupos.length > 0) {
+        grupoInv = listaGrupos[0];
+      }
+
+      if (grupoInv) {
+        if (!Array.isArray(grupoInv.miembros)) grupoInv.miembros = [];
+        if (!grupoInv.miembros.some(m => String(m).toLowerCase() === nombre.toLowerCase())) {
+          grupoInv.miembros.push(nombre);
+          try {
+            await sincronizarGrupoEnSupabase(grupoInv);
+          } catch(e) {}
+          localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos));
+        }
+      }
+
+      btnAltaInvitadoAccion.textContent = '🚀 Darme de alta y entrar al grupo';
+      concederAcceso(nombre, esCule);
+
+      if (grupoInv) {
+        cambiarGrupo(normalizarGrupo(grupoInv).nombre);
+      }
+
+      try {
+        window.history.replaceState({}, document.title, window.location.pathname);
+      } catch(e) {}
+
+      if (typeof confetti === 'function') {
+        confetti({ particleCount: 70, spread: 90 });
+      }
+      alert(`🎉 ¡Bienvenido/a, ${nombre}! Te has unido correctamente al grupo "${grupoInv ? normalizarGrupo(grupoInv).nombre : 'Kedadas'}".`);
+    } catch (err) {
+      btnAltaInvitadoAccion.textContent = '🚀 Darme de alta y entrar al grupo';
+      alert('Error en el alta: ' + err.message);
+    }
+  });
+}
+
+// Alternar entre pestañas de Login y Registro (Supabase Auth)
 if (tabAuthLogin && tabAuthRegistro) {
   tabAuthLogin.addEventListener('click', () => {
     tabAuthLogin.classList.add('activo');
@@ -296,11 +519,18 @@ if (btnLoginFace) {
 if (btnLogout) {
   btnLogout.addEventListener('click', async () => {
     if (confirm('¿Cerrar sesión en Kedadas?')) {
-      await supabaseApp.auth.signOut();
+      try {
+        await supabaseApp.auth.signOut();
+      } catch(e) {}
       usuarioLogueado = '';
       miUsuario = '';
-      pantallaApp.style.display = 'none';
-      pantallaLogin.style.display = 'block';
+      try {
+        localStorage.removeItem('kedadas_usuario_activo');
+      } catch(e) {}
+      if (cardInvitacionOnboarding) cardInvitacionOnboarding.style.display = 'none';
+      if (seccionLoginNormal) seccionLoginNormal.style.display = 'block';
+      if (pantallaApp) pantallaApp.style.display = 'none';
+      if (pantallaLogin) pantallaLogin.style.display = 'block';
     }
   });
 }
@@ -378,14 +608,11 @@ async function hashPin(pin) {
 }
 
 const PERFILES_DEFECTO = [
-  { id: 'Cule', nombre: 'Cule', rol: 'admin', es_universitario: false, ciudad_origen: 'Plasencia', ciudad_universidad: 'Madrid', ubicacion_actual: 'origen', pin_hash: HASH_DEFECTO_1234 },
-  { id: 'Persona 2', nombre: 'Persona 2', rol: 'usuario', es_universitario: true, ciudad_origen: 'Plasencia', ciudad_universidad: 'Madrid', ubicacion_actual: 'universidad', pin_hash: HASH_DEFECTO_1234 },
-  { id: 'Persona 3', nombre: 'Persona 3', rol: 'usuario', es_universitario: false, ciudad_origen: 'Plasencia', ciudad_universidad: '', ubicacion_actual: 'origen', pin_hash: HASH_DEFECTO_1234 },
-  { id: 'Persona 4', nombre: 'Persona 4', rol: 'usuario', es_universitario: false, ciudad_origen: 'Plasencia', ciudad_universidad: '', ubicacion_actual: 'origen', pin_hash: HASH_DEFECTO_1234 }
+  { id: 'Cule', nombre: 'Cule', rol: 'admin', es_universitario: false, ciudad_origen: 'Plasencia', ciudad_universidad: '', ubicacion_actual: 'origen', pin_hash: HASH_DEFECTO_1234 }
 ];
 
 let listaPerfiles = [];
-let usuarios = ['Cule', 'Persona 2', 'Persona 3', 'Persona 4'];
+let usuarios = ['Cule'];
 
 // Variable para el filtro de coincidencia según lugar de quedada ('todos' | 'origen' | 'universidad')
 let filtroLugarQuedada = 'todos';
@@ -444,6 +671,9 @@ async function cargarUsuariosDesdeBD() {
   } catch (e) {
     listaPerfiles = [...PERFILES_DEFECTO];
   }
+
+  // Purgar de inmediato usuarios ficticios de versiones antiguas (Persona 2, 3, 4)
+  listaPerfiles = listaPerfiles.filter(p => p && p.nombre && !String(p.nombre).toLowerCase().startsWith('persona '));
 
   // Asegurar que Cule siempre exista con ubicación en Plasencia
   if (!listaPerfiles.some(p => p && p.nombre && p.nombre.toLowerCase() === 'cule')) {
@@ -1321,7 +1551,7 @@ const GRUPOS_DEFECTO = [
     nombre: 'Amigos',
     icono: '🍻',
     creador: 'Cule',
-    miembros: ['Cule', 'Persona 2', 'Persona 3', 'Persona 4'],
+    miembros: ['Cule'],
     codigo_acceso: 'AMIGOS-1234',
     descripcion: 'Cuadrante con amigos'
   },
@@ -1330,7 +1560,7 @@ const GRUPOS_DEFECTO = [
     nombre: 'Familia',
     icono: '👨‍👩‍👧‍👦',
     creador: 'Cule',
-    miembros: ['Cule', 'Persona 2'],
+    miembros: ['Cule'],
     codigo_acceso: 'FAMILIA-1234',
     descripcion: 'Planes familiares'
   },
@@ -1339,7 +1569,7 @@ const GRUPOS_DEFECTO = [
     nombre: 'Pareja',
     icono: '💑',
     creador: 'Cule',
-    miembros: ['Cule', 'Persona 3'],
+    miembros: ['Cule'],
     codigo_acceso: 'PAREJA-1234',
     descripcion: 'Turnos y planes en pareja'
   },
@@ -1348,7 +1578,7 @@ const GRUPOS_DEFECTO = [
     nombre: 'Hijos',
     icono: '👶',
     creador: 'Cule',
-    miembros: ['Cule', 'Persona 4'],
+    miembros: ['Cule'],
     codigo_acceso: 'HIJOS-1234',
     descripcion: 'Horarios de los peques y actividades'
   }
@@ -1583,6 +1813,14 @@ async function cargarGruposDesdeBD() {
       listaGrupos = [...GRUPOS_DEFECTO].map(g => normalizarGrupo(g)).filter(Boolean);
     }
   }
+
+  // Limpiar miembros residuales 'Persona 2, 3, 4' de cualquier grupo
+  listaGrupos.forEach(g => {
+    if (g && Array.isArray(g.miembros)) {
+      g.miembros = g.miembros.filter(m => m && !String(m).toLowerCase().startsWith('persona '));
+      if (g.miembros.length === 0) g.miembros = ['Cule'];
+    }
+  });
 
   localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos));
   renderizarSelectorGrupos();
@@ -5523,49 +5761,63 @@ window.addEventListener('DOMContentLoaded', async () => {
   try { inicializarSelectorLugarQuedada(); } catch(e) {}
   try { inicializarModoUniversitarioPerfil(); } catch(e) {}
 
-  // Determinar usuario activo al iniciar la app: Cule (Administrador) por defecto obligatorio
-  let usuarioInicial = 'Cule';
-  let esAdminInicial = true;
-
+  // Detectar parámetro de invitación en la URL (?unirse=CODIGO o ?codigo=CODIGO)
+  let codigoInvitacion = '';
   try {
-    const usuarioGuardado = localStorage.getItem('kedadas_usuario_activo');
-    // Si el usuario guardado era 'Marisol' u otro que causaba el fallo, forzar 'Cule'
-    if (usuarioGuardado && usuarioGuardado.trim().toLowerCase() !== 'marisol' && usuarioGuardado.trim().toLowerCase() !== 'usuario') {
-      usuarioInicial = usuarioGuardado.trim();
-      esAdminInicial = (usuarioInicial.toLowerCase() === 'cule');
-    } else {
-      usuarioInicial = 'Cule';
-      esAdminInicial = true;
-      localStorage.setItem('kedadas_usuario_activo', 'Cule');
+    const params = new URLSearchParams(window.location.search);
+    codigoInvitacion = (params.get('unirse') || params.get('codigo') || params.get('join') || '').trim().toUpperCase();
+  } catch(e) {}
+
+  // Determinar usuario activo guardado en este dispositivo
+  let usuarioGuardado = '';
+  try {
+    const u = localStorage.getItem('kedadas_usuario_activo');
+    if (u && typeof u === 'string') {
+      const uTrim = u.trim();
+      if (uTrim.toLowerCase() !== 'marisol' && uTrim.toLowerCase() !== 'usuario' && !uTrim.toLowerCase().startsWith('persona ')) {
+        usuarioGuardado = uTrim;
+      } else {
+        localStorage.removeItem('kedadas_usuario_activo');
+      }
     }
   } catch(e) {}
 
+  // Comprobar sesión en Supabase Auth si existe
   try {
     const { data: { session } } = await supabaseApp.auth.getSession();
     if (session && session.user) {
       const email = session.user.email;
       let nombre = session.user.user_metadata?.nombre;
-      // Si la sesión de Supabase Auth es explícitamente Cule o admin
-      if (nombre && (nombre.toLowerCase() === 'cule' || email === 'maculecale@gmail.com')) {
-        usuarioInicial = 'Cule';
-        esAdminInicial = true;
+      if (nombre) {
+        usuarioGuardado = nombre;
+      } else if (email === 'maculecale@gmail.com') {
+        usuarioGuardado = 'Cule';
       }
     }
   } catch (e) {
     console.warn('No se encontró sesión activa de Supabase Auth.');
   }
 
-  // Arrancar siempre con acceso concedido a Cule (o usuario seleccionado)
-  try {
-    concederAcceso(usuarioInicial, esAdminInicial);
-  } catch(e) {
-    console.error('Error concediendo acceso inicial:', e);
+  // GESTIÓN INTELIGENTE DE ACCESO:
+  if (codigoInvitacion) {
+    if (usuarioGuardado) {
+      // Dispositivo con sesión iniciada previamente: acceder y preguntar unirse
+      concederAcceso(usuarioGuardado, usuarioGuardado.toLowerCase() === 'cule');
+      comprobarParametroInvitacionUrl();
+    } else {
+      // AMIGO INVITADO EN DISPOSITIVO NUEVO: mostrar onboarding para dar de alta su nombre y PIN
+      prepararPantallaInvitacion(codigoInvitacion);
+    }
+  } else if (usuarioGuardado) {
+    // DISPOSITIVO REGISTRADO (ej: Cule en su móvil): restaurar sesión directa
+    concederAcceso(usuarioGuardado, usuarioGuardado.toLowerCase() === 'cule');
+  } else {
+    // DISPOSITIVO NUEVO SIN SESIÓN: mostrar pantalla de login (sin auto-loguear como Cule)
+    if (pantallaApp) pantallaApp.style.display = 'none';
+    if (pantallaLogin) pantallaLogin.style.display = 'block';
+    if (cardInvitacionOnboarding) cardInvitacionOnboarding.style.display = 'none';
+    if (seccionLoginNormal) seccionLoginNormal.style.display = 'block';
   }
-
-  // Detectar automáticamente si se ha abierto un enlace de invitación (?unirse=KED-XXXX)
-  try {
-    comprobarParametroInvitacionUrl();
-  } catch(e) {}
 
   // Sistema de compartir horarios e invitaciones directas
   try { inicializarEventosCompartirHorario(); } catch(e) {}
@@ -5712,10 +5964,10 @@ function comprobarParametroInvitacionUrl() {
   try {
     const params = new URLSearchParams(window.location.search);
     const codigo = (params.get('unirse') || params.get('codigo') || params.get('join') || '').trim().toUpperCase();
-    if (codigo) {
+    if (codigo && usuarioLogueado) {
       if (inputCodigoUnirse) inputCodigoUnirse.value = codigo;
       setTimeout(() => {
-        const confirmar = confirm(`🔑 Has abierto una invitación para unirte con el código: ${codigo}\n\n¿Deseas unirte a este grupo privado ahora?`);
+        const confirmar = confirm(`🔑 Has abierto una invitación para unirte con el código: ${codigo}\n\n¿Deseas unir tu usuario "${usuarioLogueado}" a este grupo privado ahora?`);
         if (confirmar) {
           unirseAGrupoConCodigo();
         }

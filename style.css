@@ -4098,6 +4098,50 @@ body.dark-theme .form-cambiar-password-row input {
   color: #f1f5f9;
 }
 
+/* --- TARJETA DE ALTA E INVITACIÓN ONBOARDING --- */
+.card-invitacion-box {
+  background: #ffffff;
+  border: 2px solid #e0e7ff;
+  border-radius: 18px;
+  padding: 20px 16px;
+  margin-bottom: 20px;
+  box-shadow: 0 10px 25px rgba(79, 70, 229, 0.1);
+  text-align: center;
+}
+
+body.dark-theme .card-invitacion-box {
+  background: #1e293b;
+  border-color: #3730a3;
+}
+
+.invitacion-badge-header {
+  display: inline-block;
+  background: #e0e7ff;
+  color: #4338ca;
+  font-weight: 800;
+  font-size: 0.78rem;
+  padding: 4px 12px;
+  border-radius: 999px;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+body.dark-theme .invitacion-badge-header {
+  background: #312e81;
+  color: #c7d2fe;
+}
+
+.auth-metodo-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 15px;
+}
+
+.auth-metodo-tabs .login-tab {
+  flex: 1;
+}
+
 
 
 

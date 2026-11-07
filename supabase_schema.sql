@@ -707,3 +707,28 @@ begin
   end if;
 end $$;
 
+-- Tabla public.grupos para sincronización y códigos de acceso
+create table if not exists public.grupos (
+  id text primary key,
+  nombre text not null,
+  icono text default '👥',
+  creador text default 'Cule',
+  miembros jsonb default '["Cule"]'::jsonb,
+  codigo_acceso text unique,
+  descripcion text default '',
+  created_at timestamptz not null default timezone('utc'::text, now())
+);
+
+alter table public.grupos enable row level security;
+alter table public.grupos force row level security;
+
+drop policy if exists "grupos_select_all" on public.grupos;
+create policy "grupos_select_all" on public.grupos for select to anon, authenticated using (true);
+
+drop policy if exists "grupos_insert_all" on public.grupos;
+create policy "grupos_insert_all" on public.grupos for insert to anon, authenticated with check (true);
+
+drop policy if exists "grupos_update_all" on public.grupos;
+create policy "grupos_update_all" on public.grupos for update to anon, authenticated using (true) with check (true);
+
+
