@@ -5566,9 +5566,9 @@ if (btnAnalizarFoto) {
       return;
     }
 
-    // Análisis exitoso: normalizar turnos
+    // Análisis exitoso: normalizar turnos deduciendo el mes con precisión matemática
     scanLoadingState.style.display = 'none';
-    resultadoScanGlobal = normalizarResultadoScan(resultado, anoSeleccionado);
+    resultadoScanGlobal = normalizarResultadoScan(resultado, anoSeleccionado, mesSeleccionado);
 
     // Si la opción de auto-llenar está activa (por defecto SÍ), volcar directo al calendario de la app
     const autoLlenar = !chkAutollenarCalendario || chkAutollenarCalendario.checked;
@@ -5627,17 +5627,20 @@ async function aplicarTurnosDetectadosAlCalendario(resultadoScan, usuarioDestino
     localStorage.setItem(keyLocal, JSON.stringify(turnosLocales));
   }
 
-  // 2. Si el trabajador procesado no es el que estaba activo en pantalla, seleccionarlo
+  // 2. Sincronizar y persistir de inmediato en Supabase ANTES de pintar el calendario
+  await guardarTurnosEnLote(filasParaSupabase);
+
+  // 3. Si el trabajador procesado no es el que estaba activo en pantalla, seleccionarlo
   if (usuarioFinal && selectorUsuario && selectorUsuario.value !== usuarioFinal) {
     miUsuario = usuarioFinal;
     selectorUsuario.value = usuarioFinal;
   }
 
-  // 3. Situar la fecha de navegación en el primer mes detectado
+  // 4. Situar la fecha de navegación en el primer mes detectado
   const primerMes = meses[0].mes;
   fechaNavegacion = new Date(anio, primerMes, 1);
 
-  // 4. Si fue el año completo (>1 mes), cambiar la vista o mantenerse en mes
+  // 5. Si fue el año completo (>1 mes), cambiar la vista o mantenerse en mes
   if (meses.length > 1) {
     modoVista = 'ano';
     if (btnToggleVista) btnToggleVista.textContent = '📅 Cambiar a Vista Mensual';
@@ -5646,55 +5649,109 @@ async function aplicarTurnosDetectadosAlCalendario(resultadoScan, usuarioDestino
     if (btnToggleVista) btnToggleVista.textContent = '📅 Cambiar a Vista Anual';
   }
 
-  // 5. Iniciar y pintar el calendario visualmente de forma instantánea
+  // 6. Iniciar y pintar el calendario visualmente con los datos actualizados
   await iniciarCalendario();
 
-  // 6. Cerrar el modal para que el usuario disfrute de su calendario ya relleno
+  // 7. Cerrar el modal para que el usuario disfrute de su calendario ya relleno
   if (modalScanCuadrante) modalScanCuadrante.style.display = 'none';
 
-  // 7. Lanzar animación de confeti
+  // 8. Lanzar animación de confeti
   if (typeof confetti === 'function') {
     confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
   }
 
-  // 8. Mensaje de confirmación
+  // 9. Mensaje de confirmación
   const nombreMes = meses[0].nombreMes;
   const mensajeConfirmacion = meses.length > 1
     ? `🎉 ¡Horario volcado automáticamente en tu calendario!\nSe han rellenado ${totalDias} días del año ${anio} para ${usuarioFinal}.`
     : `🎉 ¡Horario volcado automáticamente en tu calendario!\nSe han rellenado ${totalDias} turnos de ${nombreMes} ${anio} para ${usuarioFinal}.`;
 
   setTimeout(() => { alert(mensajeConfirmacion); }, 150);
-
-  // 9. Sincronizar en segundo plano con Supabase en bloques de lote (upsert)
-  guardarTurnosEnLote(filasParaSupabase);
 }
 
-// Sincronización en bloque (batch upsert) con Supabase para máxima velocidad
+// Sincronización robusta en bloque (batch upsert con fallback unitario) con Supabase
 async function guardarTurnosEnLote(filas) {
   if (!filas || filas.length === 0) return;
   try {
-    const BLOQUE = 80;
+    const BLOQUE = 50;
     for (let i = 0; i < filas.length; i += BLOQUE) {
       const chunk = filas.slice(i, i + BLOQUE);
-      await supabaseApp.from('Turnos').upsert(chunk, { onConflict: 'usuario,dia,mes_anio' });
+      const res = await supabaseApp.from('Turnos').upsert(chunk, { onConflict: 'usuario,dia,mes_anio' });
+      if (res && res.error) {
+        console.warn('Upsert en lote requirió reintento fila por fila:', res.error);
+        for (const fila of chunk) {
+          try {
+            const { data: ex } = await supabaseApp.from('Turnos')
+              .select('id')
+              .eq('dia', fila.dia)
+              .eq('usuario', fila.usuario)
+              .eq('mes_anio', fila.mes_anio);
+            if (ex && ex.length > 0) {
+              await supabaseApp.from('Turnos').update({ indiceEstado: fila.indiceEstado }).eq('id', ex[0].id);
+            } else {
+              await supabaseApp.from('Turnos').insert(fila);
+            }
+          } catch(eSub) {}
+        }
+      }
     }
   } catch (err) {
     console.warn('Aviso sincronizando turnos en Supabase:', err);
   }
 }
 
-function normalizarResultadoScan(res, anioFallback) {
+function normalizarResultadoScan(res, anioFallback, mesSeleccionadoModal) {
   const mapaEstados = { 'X': 0, 'L': 1, 'M': 2, 'T': 3, 'N': 4, 'V': 5 };
   const anio = res.anio || anioFallback;
+  const listaNombres = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
   const mesesNormalizados = (res.meses || []).map(m => {
-    const mesIndex = (typeof m.mes === 'number' && m.mes >= 0 && m.mes <= 11) ? m.mes : 0;
+    let mesIndex = null;
+
+    // 1. Si el usuario seleccionó un mes explícito en la pantalla de escaneo, usar ese sin dudar
+    if (mesSeleccionadoModal !== null && mesSeleccionadoModal !== undefined && mesSeleccionadoModal >= 0 && mesSeleccionadoModal <= 11) {
+      mesIndex = mesSeleccionadoModal;
+    }
+
+    // 2. Deducir por el nombre textual del mes devuelto por la IA (ej. "Noviembre" -> índice 10)
+    if (mesIndex === null && m.nombreMes && typeof m.nombreMes === 'string') {
+      const nomLim = m.nombreMes.toLowerCase().trim();
+      const idx = listaNombres.findIndex(n => nomLim.includes(n.toLowerCase()));
+      if (idx >= 0) mesIndex = idx;
+    }
+
+    // 3. Si viene como número (manejando tanto escala 1-12 natural como escala 0-11)
+    if (mesIndex === null && typeof m.mes === 'number') {
+      if (m.mes >= 1 && m.mes <= 12) {
+        mesIndex = m.mes - 1;
+      } else if (m.mes === 0) {
+        mesIndex = 0;
+      }
+    }
+
+    if (mesIndex === null || mesIndex < 0 || mesIndex > 11) {
+      mesIndex = (fechaNavegacion ? fechaNavegacion.getMonth() : new Date().getMonth());
+    }
+
     const diasEnMes = new Date(anio, mesIndex + 1, 0).getDate();
     const mapaDias = {};
 
     (m.dias || []).forEach(d => {
       if (d.dia && d.dia >= 1 && d.dia <= 31) {
-        const turnoLetra = (d.turno || 'X').toUpperCase();
+        let turnoLetra = String(d.turno || 'X').trim().toUpperCase();
+        // Normalizar nomenclaturas y palabras comunes a M, T, N, L, V
+        if (turnoLetra.includes('MAÑ') || turnoLetra.includes('MAN') || turnoLetra.startsWith('M')) {
+          turnoLetra = 'M';
+        } else if (turnoLetra.includes('TARD') || turnoLetra.startsWith('T')) {
+          turnoLetra = 'T';
+        } else if (turnoLetra.includes('NOCH') || turnoLetra.startsWith('N')) {
+          turnoLetra = 'N';
+        } else if (turnoLetra.includes('LIBR') || turnoLetra.includes('DESC') || turnoLetra.startsWith('L') || turnoLetra === 'D' || turnoLetra === 'S') {
+          turnoLetra = 'L';
+        } else if (turnoLetra.includes('VAC') || turnoLetra.startsWith('V') || turnoLetra.includes('PERM')) {
+          turnoLetra = 'V';
+        }
+
         mapaDias[d.dia] = {
           turno: turnoLetra,
           indiceEstado: mapaEstados[turnoLetra] !== undefined ? mapaEstados[turnoLetra] : 0
@@ -5713,7 +5770,7 @@ function normalizarResultadoScan(res, anioFallback) {
 
     return {
       mes: mesIndex,
-      nombreMes: nombresMeses[mesIndex],
+      nombreMes: listaNombres[mesIndex],
       dias: listaCompletaDias
     };
   });

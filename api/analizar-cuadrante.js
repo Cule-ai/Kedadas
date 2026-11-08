@@ -97,7 +97,7 @@ Eres un digitalizador experto en cuadrantes de turnos laborales (sanidad, polic�
 Tu misión es extraer con total exactitud todos los turnos del trabajador/cuadrante en la imagen.
 
 CONTEXTO DE BÚSQUEDA:
-- Trabajador a extraer: "${usuario}". Si hay múltiples filas con nombres de personas, busca EXCLUSIVAMENTE la fila correspondiente a "${usuario}". Si no encuentras ese nombre específico o la tabla es para un solo trabajador/puesto, extrae el cuadrante principal visible.
+- Trabajador a extraer: "${usuario}" (o alias como "Culebras", "Miguel Ángel", o la fila/cuadrante principal visible si la tabla es para una sola persona).
 - Año de referencia: ${anio}.
 - Mes de referencia: ${mes !== null && mes !== undefined ? `${mes + 1} (${mesNombreReferencia})` : 'Detectar de la imagen'}.
 - Modo solicitado: "${modoEscaneo}" (si es 'auto', analiza si la imagen contiene solo 1 mes o el año completo/múltiples meses).
@@ -110,10 +110,15 @@ CONVENCIÓN DE TURNOS PERMITIDOS:
 - "V": Vacaciones / Permiso (ejemplos: V, VAC, AP, Asuntos propios, Permiso, Baja).
 - "X": Vacío o sin turno asignado.
 
+IMPORTANTE SOBRE PRECISIÓN:
+- Revisa celda por celda cada día del mes (1 al 28/29/30/31).
+- Distingue con extrema precisión entre "M" (Mañana) y "T" (Tarde). Si una celda indica mañana o turno matutino, asígnala a "M".
+
 REGLAS DE FORMATO Y FECHAS:
-1. El campo "mes" DEBE ser un número entero de 0 a 11 (donde 0 = Enero, 1 = Febrero, ..., 11 = Diciembre).
-2. El campo "dia" DEBE ser el número del día (1 al 28/29/30/31 según el mes).
-3. Asegúrate de incluir todos los días del mes o de los meses presentes en la foto.
+1. El campo "nombreMes" DEBE ser el nombre del mes en español (ejemplo: "Noviembre").
+2. El campo "mes" DEBE ser el número natural del mes (1 = Enero, 2 = Febrero, ..., 11 = Noviembre, 12 = Diciembre).
+3. El campo "dia" DEBE ser el número entero del día (1 al 31).
+4. Asegúrate de incluir todos los días del mes o de los meses presentes en la foto.
 
 FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO ADICIONAL):
 {
@@ -122,8 +127,8 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO ADICIONAL):
   "resumen": "Cuadrante detectado para ${usuario}...",
   "meses": [
     {
-      "mes": 0,
-      "nombreMes": "Enero",
+      "mes": 11,
+      "nombreMes": "Noviembre",
       "dias": [
         { "dia": 1, "turno": "M" },
         { "dia": 2, "turno": "T" },
