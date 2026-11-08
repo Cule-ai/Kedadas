@@ -1,6 +1,10 @@
 // Vercel Serverless Function: /api/analizar-cuadrante
 // Reconoce cuadrantes laborales de fotos y capturas (mensual o anual) usando Gemini Vision AI
 
+export const config = {
+  maxDuration: 60,
+};
+
 export default async function handler(req, res) {
   // Configuración de cabeceras CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -94,57 +98,60 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO ADICIONAL):
 }
 `;
 
-    // Intentar con gemini-2.0-flash, gemini-1.5-flash-latest y fallback a v1beta/v1
-    const modelos = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash-002', 'gemini-1.5-flash', 'gemini-2.5-flash', 'gemini-1.5-pro'];
+    // Limpiar clave de comillas y espacios accidentales
+    const cleanKey = String(geminiKey || '').trim().replace(/^['"]|['"]$/g, '');
+
+    // Modelos oficiales de Google con soporte multimodal
+    const modelos = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro'];
     let respuestaFinal = null;
     let ultimoError = null;
 
     for (const modelo of modelos) {
-      const versiones = ['v1beta', 'v1'];
-      for (const vApi of versiones) {
-        try {
-          const url = `https://generativelanguage.googleapis.com/${vApi}/models/${modelo}:generateContent?key=${geminiKey}`;
-          const geminiRes = await fetch(url, {
-            method: 'POST',
-            headers: { 
-              'Content-Type': 'application/json',
-              'x-goog-api-key': geminiKey
-            },
-            body: JSON.stringify({
-              contents: [{
-                parts: [
-                  { text: promptInstrucciones },
-                  {
-                    inline_data: {
-                      mime_type: mimeType,
-                      data: cleanBase64
-                    }
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${encodeURIComponent(cleanKey)}`;
+        const geminiRes = await fetch(url, {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'x-goog-api-key': cleanKey
+          },
+          body: JSON.stringify({
+            contents: [{
+              parts: [
+                { text: promptInstrucciones },
+                {
+                  inline_data: {
+                    mime_type: mimeType,
+                    data: cleanBase64
                   }
-                ]
-              }],
-              generationConfig: {
-                response_mime_type: 'application/json',
-                temperature: 0.1,
-                max_output_tokens: 8192
-              }
-            })
-          });
-
-          const data = await geminiRes.json();
-          if (geminiRes.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
-            const rawJson = data.candidates[0].content.parts[0].text;
-            const parsed = JSON.parse(rawJson);
-            if (parsed && Array.isArray(parsed.meses) && parsed.meses.length > 0) {
-              respuestaFinal = parsed;
-              break;
+                }
+              ]
+            }],
+            generationConfig: {
+              response_mime_type: 'application/json',
+              temperature: 0.1,
+              max_output_tokens: 8192
             }
-          } else {
-            ultimoError = data.error?.message || 'Respuesta inválida de Gemini';
-            if (geminiRes.status === 404) break; // Probar siguiente modelo
+          })
+        });
+
+        const data = await geminiRes.json();
+        if (geminiRes.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
+          let rawJson = data.candidates[0].content.parts[0].text.trim();
+          // Limpiar bloques markdown si el modelo los devolvió
+          rawJson = rawJson.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim();
+          const parsed = JSON.parse(rawJson);
+          if (parsed && Array.isArray(parsed.meses) && parsed.meses.length > 0) {
+            respuestaFinal = parsed;
+            break;
           }
-        } catch (err) {
-          ultimoError = err.message;
+        } else {
+          ultimoError = data.error?.message || (data.error ? JSON.stringify(data.error) : `Error HTTP ${geminiRes.status}`);
+          console.warn(`Aviso modelo ${modelo}:`, ultimoError);
         }
+      } catch (err) {
+        ultimoError = err.message;
+        console.warn(`Fallo llamada a modelo ${modelo}:`, err);
       }
       if (respuestaFinal) break;
     }

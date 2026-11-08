@@ -5383,54 +5383,55 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO NI MARKDOWN):
 }
 `;
 
-  // Obtener lista inteligente de modelos compatibles con generateContent
-  let modelos = await obtenerModelosGeminiDisponibles(cleanKey);
-  if (!modelos || modelos.length === 0) {
-    modelos = ['gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-flash-002', 'gemini-1.5-flash', 'gemini-2.5-flash', 'gemini-1.5-pro'];
-  }
+  // Modelos oficiales con visión multimodal
+  const modelos = ['gemini-1.5-flash', 'gemini-2.0-flash'];
   let ultimoError = null;
 
   for (const modelo of modelos) {
-    const versionesApi = ['v1beta', 'v1'];
-    for (const vApi of versionesApi) {
-      try {
-        const url = `https://generativelanguage.googleapis.com/${vApi}/models/${modelo}:generateContent?key=${cleanKey}`;
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'x-goog-api-key': cleanKey
-          },
-          body: JSON.stringify({
-            contents: [{
-              parts: [
-                { text: prompt },
-                { inline_data: { mime_type: mimeType || 'image/jpeg', data: cleanBase64 } }
-              ]
-            }],
-            generationConfig: {
-              response_mime_type: 'application/json',
-              temperature: 0.1,
-              max_output_tokens: 8192
-            }
-          })
-        });
+    try {
+      if (scanStatusSub) scanStatusSub.textContent = `Consultando Google Gemini Vision (${modelo})...`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${encodeURIComponent(cleanKey)}`;
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 25000);
 
-        const data = await res.json();
-        if (res.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
-          const rawJson = data.candidates[0].content.parts[0].text;
-          const parsed = JSON.parse(rawJson);
-          if (parsed && Array.isArray(parsed.meses) && parsed.meses.length > 0) {
-            console.log(`✅ Cuadrante analizado con éxito usando modelo ${modelo} (${vApi})`);
-            return parsed;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-goog-api-key': cleanKey
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { text: prompt },
+              { inline_data: { mime_type: mimeType || 'image/jpeg', data: cleanBase64 } }
+            ]
+          }],
+          generationConfig: {
+            response_mime_type: 'application/json',
+            temperature: 0.1,
+            max_output_tokens: 8192
           }
-        } else {
-          ultimoError = data.error?.message || (data.error ? JSON.stringify(data.error) : `Error ${res.status}`);
-          if (res.status === 404) break; // Probar siguiente modelo
+        })
+      });
+      clearTimeout(timeoutId);
+
+      const data = await res.json();
+      if (res.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
+        let rawJson = data.candidates[0].content.parts[0].text.trim();
+        rawJson = rawJson.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim();
+        const parsed = JSON.parse(rawJson);
+        if (parsed && Array.isArray(parsed.meses) && parsed.meses.length > 0) {
+          console.log(`✅ Cuadrante analizado con éxito usando modelo ${modelo}`);
+          return parsed;
         }
-      } catch (e) {
-        ultimoError = e.message;
+      } else {
+        ultimoError = data.error?.message || (data.error ? JSON.stringify(data.error) : `Error HTTP ${res.status}`);
       }
+    } catch (e) {
+      ultimoError = e.name === 'AbortError' ? 'Tiempo de espera agotado al conectar con Google Gemini.' : e.message;
     }
   }
 
