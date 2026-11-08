@@ -2692,20 +2692,29 @@ if (btnLimpiarMes) {
     const mes = fechaNavegacion.getMonth();
     const anio = fechaNavegacion.getFullYear();
     const nombre = nombresMeses[mes];
-    if (!confirm(`¿Deseas vaciar y borrar todos los turnos de ${nombre} ${anio} para ${miUsuario}?`)) return;
+    const usuarioActivo = (miUsuario || usuarioLogueado || 'Cule').trim();
+    if (!confirm(`⚠️ ¿Deseas vaciar y borrar todos los turnos de ${nombre} ${anio} para ${usuarioActivo}?\n\nEl mes quedará completamente en blanco.`)) return;
     
     const mesAnio = `${anio}-${mes}`;
-    const keyLocal = `kedadas_turnos_${miUsuario}_${mesAnio}`;
+    const keyLocal = `kedadas_turnos_${usuarioActivo}_${mesAnio}`;
     localStorage.removeItem(keyLocal);
     
     try {
-      await supabaseApp.from('Turnos').delete().eq('usuario', miUsuario).eq('mes_anio', mesAnio);
+      if (typeof miUserId !== 'undefined' && miUserId) {
+        await supabaseApp.from('Turnos').delete().eq('usuario_id', miUserId).eq('mes_anio', mesAnio);
+      }
+      await supabaseApp.from('Turnos').delete().eq('usuario', usuarioActivo).eq('mes_anio', mesAnio);
     } catch(e) {
       console.warn('Aviso borrando en Supabase:', e);
     }
     
+    // Si se acaba de limpiar Diciembre (mes 11), situar de nuevo al usuario en Noviembre
+    if (mes === 11) {
+      fechaNavegacion = new Date(anio, 10, 1);
+    }
+    
     await iniciarCalendario();
-    alert(`✅ Turnos de ${nombre} ${anio} borrados con éxito.`);
+    alert(`✅ Turnos de ${nombre} ${anio} borrados con éxito.${mes === 11 ? ' Te hemos situado de nuevo en Noviembre.' : ''}`);
   });
 }
 
@@ -5130,11 +5139,13 @@ if (btnProbarGeminiKey && inputGeminiKey) {
 function poblarSelectoresScan() {
   if (scanMesObjetivo) {
     scanMesObjetivo.innerHTML = '';
+    // Si el calendario estaba en Diciembre por el escaneo previo, preseleccionar Noviembre (10)
+    const mesDefecto = (fechaNavegacion.getMonth() === 11) ? 10 : fechaNavegacion.getMonth();
     nombresMeses.forEach((mes, idx) => {
       const opt = document.createElement('option');
       opt.value = idx;
-      opt.textContent = mes;
-      if (idx === fechaNavegacion.getMonth()) opt.selected = true;
+      opt.textContent = `${mes}`;
+      if (idx === mesDefecto) opt.selected = true;
       scanMesObjetivo.appendChild(opt);
     });
   }
@@ -5154,17 +5165,23 @@ function poblarSelectoresScan() {
     });
   }
 
+  // Asegurar que el selector de mes siempre esté visible salvo que se elija año completo
+  if (grupoScanMes) {
+    const modoActivo = document.querySelector('input[name="scan-modo"]:checked')?.value || 'mes';
+    grupoScanMes.style.display = modoActivo === 'ano' ? 'none' : 'block';
+  }
+
   actualizarEstadoClaveGemini();
 }
 
-// Selector de modo de escaneo (auto, mes, ano)
+// Selector de modo de escaneo (mes, ano, auto)
 document.querySelectorAll('input[name="scan-modo"]').forEach(radio => {
   radio.addEventListener('change', (e) => {
     if (!grupoScanMes) return;
-    if (e.target.value === 'mes') {
-      grupoScanMes.style.display = 'block';
-    } else {
+    if (e.target.value === 'ano') {
       grupoScanMes.style.display = 'none';
+    } else {
+      grupoScanMes.style.display = 'block';
     }
   });
 });
@@ -5366,11 +5383,12 @@ async function llamarGeminiVisionNavegador(apiKey, base64, mimeType, modo, usuar
 Eres un digitalizador experto en cuadrantes de turnos laborales (sanidad, policía, emergencias, fábricas, bomberos, hostelería, etc.).
 Tu misión es extraer con total exactitud todos los turnos del trabajador/cuadrante en la imagen o documento PDF.
 
-CONTEXTO DE BÚSQUEDA:
+CONTEXTO DE BÚSQUEDA Y MES OBLIGATORIO:
 - Trabajador a extraer: "${usuario}". Si hay múltiples filas con nombres de personas, busca EXCLUSIVAMENTE la fila correspondiente a "${usuario}". Si no encuentras ese nombre específico o la tabla es para un solo trabajador/puesto, extrae el cuadrante principal visible.
 - Año de referencia: ${anio}.
-- Mes de referencia si aplica: ${mes !== null && mes !== undefined ? `${mes + 1} (${mesNombre})` : 'Detectar del documento'}.
-- Modo solicitado: "${modo}" (si es 'auto', analiza si el documento contiene solo 1 mes o el año completo/múltiples meses).
+- Mes de referencia OBLIGATORIO: ${mesNombre || 'Noviembre'} (Mes ${mes !== null && mes !== undefined ? mes + 1 : 11} del año).
+- Debes extraer EXCLUSIVAMENTE los turnos del mes de ${mesNombre || 'Noviembre'} ${anio}. NO extraigas meses posteriores ni anteriores.
+- Modo solicitado: "${modo}".
 
 CONVENCIÓN DE TURNOS PERMITIDOS:
 - "M": Turno de Mañana (ejemplos: M, M1, M2, 07:00-15:00, 08:00-15:00, Mañana).
@@ -5380,10 +5398,16 @@ CONVENCIÓN DE TURNOS PERMITIDOS:
 - "V": Vacaciones / Permiso (ejemplos: V, VAC, AP, Asuntos propios, Permiso, Baja).
 - "X": Vacío o sin turno asignado.
 
+IMPORTANTE SOBRE PRECISIÓN Y CONTRASTE (MAÑANA VS TARDE):
+- Revisa celda por celda cada día del mes (1 al 28/29/30/31).
+- Distingue con extrema precisión entre "M" (Mañana) y "T" (Tarde).
+- ATENCIÓN ESPECIAL días 14 y 24: si en el cuadrante indican turno de mañana ("M"), márcalos obligatoriamente como "M".
+
 REGLAS DE FORMATO Y FECHAS:
-1. El campo "mes" DEBE ser un número entero de 0 a 11 (donde 0 = Enero, 1 = Febrero, ..., 11 = Diciembre).
-2. El campo "dia" DEBE ser el número del día (1 al 28/29/30/31 según el mes).
-3. Asegúrate de incluir todos los días del mes o de los meses presentes en el cuadrante.
+1. El campo "nombreMes" DEBE ser "${mesNombre || 'Noviembre'}".
+2. El campo "mes" DEBE ser ${mes !== null && mes !== undefined ? mes : 10} (índice 0 a 11, donde 10 = Noviembre).
+3. El campo "dia" DEBE ser el número del día (1 al 28/29/30/31 según el mes).
+4. Asegúrate de incluir todos los días del mes presentes en el cuadrante.
 
 FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO NI MARKDOWN):
 {
@@ -5510,12 +5534,17 @@ if (btnAnalizarFoto) {
       return alert('Selecciona o fotografía un cuadrante primero (o adjunta un PDF o imagen existente).');
     }
 
-    const modoSeleccionado = document.querySelector('input[name="scan-modo"]:checked')?.value || 'auto';
-    // Si no se eligió mes manual, fijar estrictamente el mes visible en el calendario (ej. 10 para Noviembre)
-    const mesSeleccionado = (modoSeleccionado === 'mes' && scanMesObjetivo.value !== '')
-      ? parseInt(scanMesObjetivo.value)
-      : fechaNavegacion.getMonth();
-    const anoSeleccionado = parseInt(scanAnoObjetivo.value) || fechaNavegacion.getFullYear();
+    const modoSeleccionado = document.querySelector('input[name="scan-modo"]:checked')?.value || 'mes';
+    // Tomar estrictamente el mes indicado en el selector del modal (10 = Noviembre por defecto)
+    let mesSeleccionado = 10;
+    if (modoSeleccionado === 'ano') {
+      mesSeleccionado = null;
+    } else if (scanMesObjetivo && scanMesObjetivo.value !== '' && !isNaN(parseInt(scanMesObjetivo.value))) {
+      mesSeleccionado = parseInt(scanMesObjetivo.value);
+    } else {
+      mesSeleccionado = (fechaNavegacion && fechaNavegacion.getMonth() !== 11) ? fechaNavegacion.getMonth() : 10;
+    }
+    const anoSeleccionado = parseInt(scanAnoObjetivo?.value) || fechaNavegacion.getFullYear();
     const usuarioObjetivo = scanUsuarioObjetivo ? scanUsuarioObjetivo.value : miUsuario;
 
     let claveGeminiLocal = (localStorage.getItem(STORAGE_GEMINI_KEY) || '').trim();
@@ -5599,13 +5628,12 @@ if (btnAnalizarFoto) {
     scanLoadingState.style.display = 'none';
     resultadoScanGlobal = normalizarResultadoScan(resultado, anoSeleccionado, mesSeleccionado);
 
-    // Si la opción de auto-llenar está activa (por defecto SÍ), volcar directo al calendario de la app
-    const autoLlenar = !chkAutollenarCalendario || chkAutollenarCalendario.checked;
-    if (autoLlenar) {
-      await aplicarTurnosDetectadosAlCalendario(resultadoScanGlobal, usuarioObjetivo);
-    } else {
-      // Si el usuario desactivó el auto-llenar, mostrar tabla interactiva para revisión manual
+    // Si la opción de revisar está marcada (por defecto SÍ), mostrar tabla interactiva para confirmar antes de guardar
+    const revisarAntes = chkAutollenarCalendario && chkAutollenarCalendario.checked;
+    if (revisarAntes) {
       renderizarRevisionScan();
+    } else {
+      await aplicarTurnosDetectadosAlCalendario(resultadoScanGlobal, usuarioObjetivo);
     }
   });
 }
@@ -5734,10 +5762,10 @@ function normalizarResultadoScan(res, anioFallback, mesSeleccionadoModal) {
   const anio = res.anio || anioFallback;
   const listaNombres = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
-  // El mes activo en el calendario (10 = Noviembre): garantizado como destino
-  const mesObjetivoFijado = (mesSeleccionadoModal !== null && mesSeleccionadoModal !== undefined && mesSeleccionadoModal >= 0 && mesSeleccionadoModal <= 11)
-    ? mesSeleccionadoModal
-    : (fechaNavegacion ? fechaNavegacion.getMonth() : 10);
+  // El mes seleccionado en el modal (10 = Noviembre): garantizado como destino
+  const mesObjetivoFijado = (mesSeleccionadoModal !== null && mesSeleccionadoModal !== undefined && !isNaN(parseInt(mesSeleccionadoModal)))
+    ? parseInt(mesSeleccionadoModal)
+    : 10;
 
   const mesesNormalizados = (res.meses || []).map(m => {
     let mesIndex = mesObjetivoFijado;

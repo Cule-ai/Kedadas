@@ -27,7 +27,7 @@
   <meta http-equiv="X-Content-Type-Options" content="nosniff">
   <meta name="referrer" content="strict-origin-when-cross-origin">
 
-  <link rel="stylesheet" href="style.css?v=38">
+  <link rel="stylesheet" href="style.css?v=39">
 </head>
 <body>
 
@@ -207,7 +207,7 @@
           <button id="btn-abrir-scan-foto" class="btn-scan-foto">📷 Escanear con IA</button>
           <button id="btn-secuencia" class="btn-secuencia">✨ Rellenar secuencia</button>
           <button type="button" id="btn-guardar-horario-top" class="btn-guardar-horario-top" title="Guardar modificaciones del horario">💾 Guardar Horario</button>
-          <button type="button" id="btn-limpiar-mes" class="btn-limpiar-mes-btn" title="Limpiar los turnos del mes visible">🗑️ Limpiar mes</button>
+          <button type="button" id="btn-limpiar-mes" class="btn-limpiar-mes-btn" title="Limpiar y borrar todos los turnos del mes actual">🗑️ Limpiar mes actual</button>
         </div>
       </div>
 
@@ -741,16 +741,16 @@
         <div class="scan-options-card" id="scan-config-row" style="display: none;">
           <div class="scan-mode-selector">
             <label class="scan-mode-option">
-              <input type="radio" name="scan-modo" value="auto" checked>
-              <span>✨ Automático (Detectar mes o año según foto)</span>
-            </label>
-            <label class="scan-mode-option">
-              <input type="radio" name="scan-modo" value="mes">
+              <input type="radio" name="scan-modo" value="mes" checked>
               <span>📅 Mes específico</span>
             </label>
             <label class="scan-mode-option">
               <input type="radio" name="scan-modo" value="ano">
               <span>📆 Año completo (12 meses)</span>
+            </label>
+            <label class="scan-mode-option">
+              <input type="radio" name="scan-modo" value="auto">
+              <span>✨ Detección automática</span>
             </label>
           </div>
 
@@ -759,9 +759,10 @@
               <label for="scan-usuario-objetivo">👤 Trabajador a extraer:</label>
               <select id="scan-usuario-objetivo"></select>
             </div>
-            <div class="form-group" id="grupo-scan-mes">
-              <label for="scan-mes-objetivo">Mes de referencia:</label>
-              <select id="scan-mes-objetivo"></select>
+            <div class="form-group" id="grupo-scan-mes" style="display: block;">
+              <label for="scan-mes-objetivo" style="font-weight: 700; color: #4338ca;">📅 Mes de destino en calendario:</label>
+              <select id="scan-mes-objetivo" style="font-weight: 700; color: #4338ca; border: 2px solid #6366f1; border-radius: 10px; padding: 6px 10px;"></select>
+              <small style="color: #6366f1; display: block; margin-top: 3px; font-size: 0.75rem;">Los turnos detectados se guardarán en este mes.</small>
             </div>
             <div class="form-group">
               <label for="scan-ano-objetivo">Año de referencia:</label>
@@ -772,8 +773,8 @@
           <!-- Opción de revisión o relleno directo -->
           <div class="scan-auto-fill-card">
             <label class="custom-checkbox-scan">
-              <input type="checkbox" id="chk-autollenar-calendario">
-              <span>⚡ <strong>Aplicar directo sin revisar</strong> (desmarcado te muestra la tabla para confirmar cada día)</span>
+              <input type="checkbox" id="chk-autollenar-calendario" checked>
+              <span>📋 <strong>Revisar turnos antes de volcar</strong> (confirmar días 14 y 24 antes de guardar)</span>
             </label>
           </div>
         </div>
@@ -942,6 +943,6 @@
 
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="app.js?v=38"></script>
+  <script src="app.js?v=39"></script>
 </body>
 </html>

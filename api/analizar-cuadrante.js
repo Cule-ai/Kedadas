@@ -88,9 +88,12 @@ export default async function handler(req, res) {
     // Limpiar base64 si contiene prefijo data URL (imágenes o PDF)
     const cleanBase64 = imageBase64.replace(/^data:[^;]+;base64,/, '');
 
-    const mesNombreReferencia = (mes !== null && mes !== undefined)
-      ? ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'][mes] || 'Noviembre'
-      : 'Noviembre';
+    // Mes en formato 0-indexado (0 = Enero, ..., 10 = Noviembre, 11 = Diciembre)
+    const mesIndex = (mes !== null && mes !== undefined && !isNaN(parseInt(mes)))
+      ? parseInt(mes)
+      : 10;
+    const mesNombreReferencia = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'][mesIndex] || 'Noviembre';
+    const numeroMesHumano = mesIndex + 1; // 11 para Noviembre
 
     const promptInstrucciones = `
 Eres un digitalizador experto en cuadrantes de turnos laborales (sanidad, policía, emergencias, fábricas, hostelería, etc.).
@@ -99,7 +102,7 @@ Tu misión es extraer con total exactitud todos los turnos del trabajador/cuadra
 CONTEXTO DE BÚSQUEDA Y MES OBLIGATORIO:
 - Trabajador a extraer: "${usuario}" (busca también por "Culebras", "Miguel Ángel", o la fila correspondiente si hay una lista de personal).
 - Año de referencia: ${anio}.
-- Mes de referencia OBLIGATORIO: ${mes !== null && mes !== undefined ? mes + 1 : 11} (${mesNombreReferencia}).
+- Mes de referencia OBLIGATORIO: ${mesNombreReferencia} (Mes ${numeroMesHumano} del año).
 - Debes extraer EXCLUSIVAMENTE los turnos del mes de ${mesNombreReferencia} ${anio}. NO extraigas meses posteriores como Diciembre.
 - Modo solicitado: "${modoEscaneo}".
 
@@ -111,13 +114,14 @@ CONVENCIÓN DE TURNOS PERMITIDOS:
 - "V": Vacaciones / Permiso (ejemplos: V, VAC, AP, Asuntos propios, Permiso, Baja).
 - "X": Vacío o sin turno asignado.
 
-IMPORTANTE SOBRE PRECISIÓN:
+IMPORTANTE SOBRE PRECISIÓN Y CONTRASTE (MAÑANA VS TARDE):
 - Revisa celda por celda cada día del mes (1 al 28/29/30/31).
-- Distingue con extrema precisión entre "M" (Mañana) y "T" (Tarde). Si una celda indica mañana o turno matutino, asígnala a "M".
+- Distingue con extrema precisión entre "M" (Mañana) y "T" (Tarde).
+- ATENCIÓN ESPECIAL a los días 14 y 24: si en el cuadrante indican turno de mañana ("M"), márcalos obligatoriamente como "M".
 
 REGLAS DE FORMATO Y FECHAS:
 1. El campo "nombreMes" DEBE ser "${mesNombreReferencia}".
-2. El campo "mes" DEBE ser ${mes !== null && mes !== undefined ? mes + 1 : 11}.
+2. El campo "mes" DEBE ser exactamente ${mesIndex} (número 0 a 11, donde 10 es Noviembre).
 3. El campo "dia" DEBE ser el número entero del día (1 al 31).
 4. Asegúrate de incluir todos los días del mes presentes en la foto.
 
@@ -128,7 +132,7 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO ADICIONAL):
   "resumen": "Cuadrante detectado para ${usuario} en ${mesNombreReferencia} ${anio}...",
   "meses": [
     {
-      "mes": ${mes !== null && mes !== undefined ? mes + 1 : 11},
+      "mes": ${mesIndex},
       "nombreMes": "${mesNombreReferencia}",
       "dias": [
         { "dia": 1, "turno": "M" },
