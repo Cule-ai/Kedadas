@@ -101,55 +101,12 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO ADICIONAL):
     // Limpiar clave de comillas y espacios accidentales
     const cleanKey = String(geminiKey || '').trim().replace(/^['"]|['"]$/g, '');
 
-    // 1. Obtener dinámicamente los modelos activos disponibles para esta clave en Google AI
-    let modelosDisponibles = [];
-    try {
-      const listRes = await fetch('https://generativelanguage.googleapis.com/v1beta/models', {
-        headers: { 'x-goog-api-key': cleanKey }
-      });
-      if (listRes.ok) {
-        const listData = await listRes.json();
-        if (Array.isArray(listData.models)) {
-          modelosDisponibles = listData.models
-            .filter(m => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent'))
-            .map(m => m.name.replace(/^models\//, ''));
-        }
-      }
-    } catch (e) {
-      console.warn('Aviso listando modelos en Google:', e);
-    }
-
-    // Ordenar dando prioridad a los modelos Flash más modernos y compatibles
-    const modelosOrdenados = [];
-    const prioridades = [
-      'gemini-2.5-flash',
-      'gemini-3.8-flash',
-      'gemini-3.5-flash',
-      'gemini-2.0-flash',
-      'gemini-2.5-pro',
-      'gemini-1.5-flash'
-    ];
-
-    for (const p of prioridades) {
-      const match = modelosDisponibles.find(m => m === p || m.startsWith(p));
-      if (match && !modelosOrdenados.includes(match)) modelosOrdenados.push(match);
-    }
-    for (const m of modelosDisponibles) {
-      if (!modelosOrdenados.includes(m) && m.includes('flash')) modelosOrdenados.push(m);
-    }
-    for (const m of modelosDisponibles) {
-      if (!modelosOrdenados.includes(m)) modelosOrdenados.push(m);
-    }
-
-    // Si la lista dinámica falló o vino vacía, usar lista de fallback
-    const modelosAFinal = modelosOrdenados.length > 0
-      ? modelosOrdenados.slice(0, 4)
-      : ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-1.5-flash'];
-
+    // Modelos rápidos compatibles con visión multimodal (orden de velocidad directa, sin llamadas previas lentas)
+    const modelos = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemini-1.5-flash'];
     let respuestaFinal = null;
-    const erroresDetalle = [];
+    let ultimoError = null;
 
-    for (const modelo of modelosAFinal) {
+    for (const modelo of modelos) {
       try {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`;
         const geminiRes = await fetch(url, {
@@ -172,8 +129,8 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO ADICIONAL):
             }],
             generationConfig: {
               response_mime_type: 'application/json',
-              temperature: 0.1,
-              max_output_tokens: 8192
+              temperature: 0,
+              max_output_tokens: 4096
             }
           })
         });
@@ -188,12 +145,11 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO ADICIONAL):
             break;
           }
         } else {
-          const errTxt = data.error?.message || (data.error ? JSON.stringify(data.error) : `HTTP ${geminiRes.status}`);
-          erroresDetalle.push(`${modelo}: ${errTxt}`);
-          console.warn(`Aviso modelo ${modelo}:`, errTxt);
+          ultimoError = data.error?.message || `HTTP ${geminiRes.status}`;
+          console.warn(`Aviso modelo ${modelo}:`, ultimoError);
         }
       } catch (err) {
-        erroresDetalle.push(`${modelo}: ${err.message}`);
+        ultimoError = err.message;
         console.warn(`Fallo llamada a modelo ${modelo}:`, err);
       }
       if (respuestaFinal) break;
@@ -202,9 +158,7 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO ADICIONAL):
     if (!respuestaFinal) {
       return res.status(500).json({
         error: 'ERROR_GEMINI',
-        message: erroresDetalle.length > 0
-          ? `Error analizando con IA (${erroresDetalle.join(' | ')})`
-          : 'No se pudo interpretar el cuadrante con el modelo de IA.'
+        message: ultimoError || 'No se pudo interpretar el cuadrante con el modelo de IA.'
       });
     }
 

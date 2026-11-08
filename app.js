@@ -5295,7 +5295,7 @@ function procesarArchivoImagen(file) {
     const rawData = event.target.result;
     const img = new Image();
     img.onload = () => {
-      const maxDim = 1600;
+      const maxDim = 1200;
       let w = img.width;
       let h = img.height;
       if (w > maxDim || h > maxDim) {
@@ -5312,7 +5312,7 @@ function procesarArchivoImagen(file) {
       canvas.height = h;
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0, w, h);
-      imagenBase64Actual = canvas.toDataURL('image/jpeg', 0.85);
+      imagenBase64Actual = canvas.toDataURL('image/jpeg', 0.72);
 
       if (previewPdfInfo) previewPdfInfo.style.display = 'none';
       if (previewFotoCuadrante) {
