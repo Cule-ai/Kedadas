@@ -104,7 +104,7 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO ADICIONAL):
     // 1. Obtener dinámicamente los modelos activos disponibles para esta clave en Google AI
     let modelosDisponibles = [];
     try {
-      const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(cleanKey)}`, {
+      const listRes = await fetch('https://generativelanguage.googleapis.com/v1beta/models', {
         headers: { 'x-goog-api-key': cleanKey }
       });
       if (listRes.ok) {
@@ -151,7 +151,7 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO ADICIONAL):
 
     for (const modelo of modelosAFinal) {
       try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${encodeURIComponent(cleanKey)}`;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`;
         const geminiRes = await fetch(url, {
           method: 'POST',
           headers: { 

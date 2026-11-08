@@ -5390,7 +5390,7 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO NI MARKDOWN):
   for (const modelo of modelos) {
     try {
       if (scanStatusSub) scanStatusSub.textContent = `Consultando Google Gemini Vision (${modelo})...`;
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${encodeURIComponent(cleanKey)}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`;
       
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 25000);
@@ -5493,11 +5493,11 @@ if (btnAnalizarFoto) {
       ultimoErrorDetalle = errServ.message;
     }
 
-    // 2. FALLBACK HÍBRIDO INTELIGENTE: Si el backend no existe (ej. localhost:8080 o PWA) o falló, procesar directamente en el navegador
-    if (!resultado) {
+    // 2. FALLBACK HÍBRIDO: Solo si el servidor backend no existe (entorno puramente local o estático)
+    if (!resultado && !ultimoErrorDetalle) {
       if (claveGeminiLocal) {
         try {
-          scanStatusSub.textContent = `Procesando directamente en tu navegador con Google Gemini Vision...`;
+          scanStatusSub.textContent = `Procesando en tu navegador con Google Gemini Vision...`;
           resultado = await llamarGeminiVisionNavegador(
             claveGeminiLocal,
             imagenBase64Actual,
@@ -5512,7 +5512,6 @@ if (btnAnalizarFoto) {
           ultimoErrorDetalle = errNavegador.message;
         }
       } else {
-        // Si no hay servidor disponible ni clave guardada en el navegador, guiar al usuario
         scanLoadingState.style.display = 'none';
         btnAnalizarFoto.style.display = 'inline-block';
         if (boxConfigIA) boxConfigIA.style.display = 'block';
