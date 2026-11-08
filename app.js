@@ -2685,6 +2685,30 @@ selectorUsuario.addEventListener('change', (e) => {
   iniciarCalendario();
 });
 
+// Botón para vaciar / limpiar los turnos del mes visible con 1 clic
+const btnLimpiarMes = document.getElementById('btn-limpiar-mes');
+if (btnLimpiarMes) {
+  btnLimpiarMes.addEventListener('click', async () => {
+    const mes = fechaNavegacion.getMonth();
+    const anio = fechaNavegacion.getFullYear();
+    const nombre = nombresMeses[mes];
+    if (!confirm(`¿Deseas vaciar y borrar todos los turnos de ${nombre} ${anio} para ${miUsuario}?`)) return;
+    
+    const mesAnio = `${anio}-${mes}`;
+    const keyLocal = `kedadas_turnos_${miUsuario}_${mesAnio}`;
+    localStorage.removeItem(keyLocal);
+    
+    try {
+      await supabaseApp.from('Turnos').delete().eq('usuario', miUsuario).eq('mes_anio', mesAnio);
+    } catch(e) {
+      console.warn('Aviso borrando en Supabase:', e);
+    }
+    
+    await iniciarCalendario();
+    alert(`✅ Turnos de ${nombre} ${anio} borrados con éxito.`);
+  });
+}
+
 // --- 5. LÓGICA DE TURNOS DUAL (SUPABASE + LOCAL STORAGE POR USUARIO) ---
 async function guardarTurnoNube(dia, indiceEstado, mesAnioEspecifico = null) {
   const mesAnio = mesAnioEspecifico || `${fechaNavegacion.getFullYear()}-${fechaNavegacion.getMonth()}`;
@@ -5487,7 +5511,10 @@ if (btnAnalizarFoto) {
     }
 
     const modoSeleccionado = document.querySelector('input[name="scan-modo"]:checked')?.value || 'auto';
-    const mesSeleccionado = modoSeleccionado === 'mes' ? parseInt(scanMesObjetivo.value) : null;
+    // Si no se eligió mes manual, fijar estrictamente el mes visible en el calendario (ej. 10 para Noviembre)
+    const mesSeleccionado = (modoSeleccionado === 'mes' && scanMesObjetivo.value !== '')
+      ? parseInt(scanMesObjetivo.value)
+      : fechaNavegacion.getMonth();
     const anoSeleccionado = parseInt(scanAnoObjetivo.value) || fechaNavegacion.getFullYear();
     const usuarioObjetivo = scanUsuarioObjetivo ? scanUsuarioObjetivo.value : miUsuario;
 
@@ -5707,32 +5734,27 @@ function normalizarResultadoScan(res, anioFallback, mesSeleccionadoModal) {
   const anio = res.anio || anioFallback;
   const listaNombres = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
+  // El mes activo en el calendario (10 = Noviembre): garantizado como destino
+  const mesObjetivoFijado = (mesSeleccionadoModal !== null && mesSeleccionadoModal !== undefined && mesSeleccionadoModal >= 0 && mesSeleccionadoModal <= 11)
+    ? mesSeleccionadoModal
+    : (fechaNavegacion ? fechaNavegacion.getMonth() : 10);
+
   const mesesNormalizados = (res.meses || []).map(m => {
-    let mesIndex = null;
+    let mesIndex = mesObjetivoFijado;
 
-    // 1. Si el usuario seleccionó un mes explícito en la pantalla de escaneo, usar ese sin dudar
-    if (mesSeleccionadoModal !== null && mesSeleccionadoModal !== undefined && mesSeleccionadoModal >= 0 && mesSeleccionadoModal <= 11) {
-      mesIndex = mesSeleccionadoModal;
-    }
-
-    // 2. Deducir por el nombre textual del mes devuelto por la IA (ej. "Noviembre" -> índice 10)
-    if (mesIndex === null && m.nombreMes && typeof m.nombreMes === 'string') {
-      const nomLim = m.nombreMes.toLowerCase().trim();
-      const idx = listaNombres.findIndex(n => nomLim.includes(n.toLowerCase()));
-      if (idx >= 0) mesIndex = idx;
-    }
-
-    // 3. Si viene como número (manejando tanto escala 1-12 natural como escala 0-11)
-    if (mesIndex === null && typeof m.mes === 'number') {
-      if (m.mes >= 1 && m.mes <= 12) {
-        mesIndex = m.mes - 1;
-      } else if (m.mes === 0) {
-        mesIndex = 0;
+    // Solo si estamos en escaneo de año completo multimes permitimos que varíe el mes
+    if (res.modo === 'ano' || (res.meses && res.meses.length > 1)) {
+      if (m.nombreMes && typeof m.nombreMes === 'string') {
+        const nomLim = m.nombreMes.toLowerCase().trim();
+        const idx = listaNombres.findIndex(n => nomLim.includes(n.toLowerCase()));
+        if (idx >= 0) mesIndex = idx;
+      } else if (typeof m.mes === 'number') {
+        if (m.mes >= 1 && m.mes <= 12) {
+          mesIndex = m.mes - 1;
+        } else if (m.mes === 0) {
+          mesIndex = 0;
+        }
       }
-    }
-
-    if (mesIndex === null || mesIndex < 0 || mesIndex > 11) {
-      mesIndex = (fechaNavegacion ? fechaNavegacion.getMonth() : new Date().getMonth());
     }
 
     const diasEnMes = new Date(anio, mesIndex + 1, 0).getDate();

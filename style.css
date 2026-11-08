@@ -1386,6 +1386,29 @@ body.dark-theme .btn-compartir-horario {
   padding: 12px 6px;
 }
 
+.btn-limpiar-mes-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 14px;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 14px;
+  font-weight: 700;
+  font-size: 0.88rem;
+  color: #64748b;
+  background: #f8fafc;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-limpiar-mes-btn:hover {
+  background: #fee2e2;
+  color: #dc2626;
+  border-color: #fca5a5;
+}
+.btn-limpiar-mes-btn:active {
+  transform: scale(0.97);
+}
+
 .btn-scan-foto {
   display: block;
   width: 100%;

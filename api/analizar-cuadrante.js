@@ -89,18 +89,19 @@ export default async function handler(req, res) {
     const cleanBase64 = imageBase64.replace(/^data:[^;]+;base64,/, '');
 
     const mesNombreReferencia = (mes !== null && mes !== undefined)
-      ? ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'][mes] || ''
-      : '';
+      ? ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'][mes] || 'Noviembre'
+      : 'Noviembre';
 
     const promptInstrucciones = `
 Eres un digitalizador experto en cuadrantes de turnos laborales (sanidad, policía, emergencias, fábricas, hostelería, etc.).
 Tu misión es extraer con total exactitud todos los turnos del trabajador/cuadrante en la imagen.
 
-CONTEXTO DE BÚSQUEDA:
-- Trabajador a extraer: "${usuario}" (o alias como "Culebras", "Miguel Ángel", o la fila/cuadrante principal visible si la tabla es para una sola persona).
+CONTEXTO DE BÚSQUEDA Y MES OBLIGATORIO:
+- Trabajador a extraer: "${usuario}" (busca también por "Culebras", "Miguel Ángel", o la fila correspondiente si hay una lista de personal).
 - Año de referencia: ${anio}.
-- Mes de referencia: ${mes !== null && mes !== undefined ? `${mes + 1} (${mesNombreReferencia})` : 'Detectar de la imagen'}.
-- Modo solicitado: "${modoEscaneo}" (si es 'auto', analiza si la imagen contiene solo 1 mes o el año completo/múltiples meses).
+- Mes de referencia OBLIGATORIO: ${mes !== null && mes !== undefined ? mes + 1 : 11} (${mesNombreReferencia}).
+- Debes extraer EXCLUSIVAMENTE los turnos del mes de ${mesNombreReferencia} ${anio}. NO extraigas meses posteriores como Diciembre.
+- Modo solicitado: "${modoEscaneo}".
 
 CONVENCIÓN DE TURNOS PERMITIDOS:
 - "M": Turno de Mañana (ejemplos: M, M1, M2, 07:00-15:00, 08:00-15:00, Mañana).
@@ -115,20 +116,20 @@ IMPORTANTE SOBRE PRECISIÓN:
 - Distingue con extrema precisión entre "M" (Mañana) y "T" (Tarde). Si una celda indica mañana o turno matutino, asígnala a "M".
 
 REGLAS DE FORMATO Y FECHAS:
-1. El campo "nombreMes" DEBE ser el nombre del mes en español (ejemplo: "Noviembre").
-2. El campo "mes" DEBE ser el número natural del mes (1 = Enero, 2 = Febrero, ..., 11 = Noviembre, 12 = Diciembre).
+1. El campo "nombreMes" DEBE ser "${mesNombreReferencia}".
+2. El campo "mes" DEBE ser ${mes !== null && mes !== undefined ? mes + 1 : 11}.
 3. El campo "dia" DEBE ser el número entero del día (1 al 31).
-4. Asegúrate de incluir todos los días del mes o de los meses presentes en la foto.
+4. Asegúrate de incluir todos los días del mes presentes en la foto.
 
 FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO ADICIONAL):
 {
-  "modo": "mes" o "ano",
+  "modo": "mes",
   "anio": ${anio},
-  "resumen": "Cuadrante detectado para ${usuario}...",
+  "resumen": "Cuadrante detectado para ${usuario} en ${mesNombreReferencia} ${anio}...",
   "meses": [
     {
-      "mes": 11,
-      "nombreMes": "Noviembre",
+      "mes": ${mes !== null && mes !== undefined ? mes + 1 : 11},
+      "nombreMes": "${mesNombreReferencia}",
       "dias": [
         { "dia": 1, "turno": "M" },
         { "dia": 2, "turno": "T" },
