@@ -5290,7 +5290,8 @@ function procesarArchivoImagen(file) {
     const rawData = event.target.result;
     const img = new Image();
     img.onload = () => {
-      const maxDim = 1200;
+      // Resolución nítida en alta definición para cuadrantes con casillas pequeñas (evita confundir M con T)
+      const maxDim = 2048;
       let w = img.width;
       let h = img.height;
       if (w > maxDim || h > maxDim) {
@@ -5307,7 +5308,8 @@ function procesarArchivoImagen(file) {
       canvas.height = h;
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0, w, h);
-      imagenBase64Actual = canvas.toDataURL('image/jpeg', 0.72);
+      // Calidad alta (0.88) para que los textos finos y letras M / T no se difuminen con artefactos JPEG
+      imagenBase64Actual = canvas.toDataURL('image/jpeg', 0.88);
 
       if (previewPdfInfo) previewPdfInfo.style.display = 'none';
       if (previewFotoCuadrante) {
@@ -5840,6 +5842,11 @@ function renderizarRevisionScan() {
       mesActivoEnRevision = 0;
     }
   }
+
+  // Ocultar selectores de escaneo y mostrar la tabla de revisión limpia
+  if (scanConfigRow) scanConfigRow.style.display = 'none';
+  if (dropZoneFoto) dropZoneFoto.style.display = 'none';
+  if (btnAnalizarFoto) btnAnalizarFoto.style.display = 'none';
 
   pintarDiasDelMesEnRevision();
 
