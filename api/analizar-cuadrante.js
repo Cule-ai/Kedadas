@@ -137,8 +137,8 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO ADICIONAL):
     // Limpiar clave de comillas y espacios accidentales
     const cleanKey = String(geminiKey || '').trim().replace(/^['"]|['"]$/g, '');
 
-    // Modelos oficiales vigentes con visión multimodal ultra-rápida (2025/2026)
-    const modelos = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+    // Modelos oficiales vigentes para cuentas nuevas de Google AI Studio (Gemini 3.x)
+    const modelos = ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.6-flash'];
     let respuestaFinal = null;
     let ultimoError = null;
 
@@ -167,7 +167,6 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO ADICIONAL):
             }],
             generationConfig: {
               responseMimeType: 'application/json',
-              temperature: 0,
               maxOutputTokens: 4096
             }
           })

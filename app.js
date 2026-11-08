@@ -4999,9 +4999,10 @@ if (btnGuardarGeminiKey && inputGeminiKey) {
 async function obtenerModelosGeminiDisponibles(apiKey) {
   const cleanKey = (apiKey || '').trim().replace(/^['"]|['"]$/g, '');
   const preferencia = [
-    'gemini-2.5-flash',
-    'gemini-2.5-flash-lite',
-    'gemini-2.5-pro'
+    'gemini-3.5-flash-lite',
+    'gemini-3.8-flash',
+    'gemini-3.6-flash',
+    'gemini-2.5-flash'
   ];
 
   if (!cleanKey) return preferencia;
@@ -5377,8 +5378,8 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO NI MARKDOWN):
 }
 `;
 
-  // Modelos oficiales vigentes con visión multimodal
-  const modelos = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+  // Modelos oficiales vigentes con visión multimodal (Gemini 3.x)
+  const modelos = ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.6-flash'];
   let ultimoError = null;
 
   for (const modelo of modelos) {
@@ -5410,7 +5411,6 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO NI MARKDOWN):
           }],
           generationConfig: {
             responseMimeType: 'application/json',
-            temperature: 0,
             maxOutputTokens: 4096
           }
         })
