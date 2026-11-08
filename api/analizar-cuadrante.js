@@ -101,12 +101,55 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO ADICIONAL):
     // Limpiar clave de comillas y espacios accidentales
     const cleanKey = String(geminiKey || '').trim().replace(/^['"]|['"]$/g, '');
 
-    // Modelos oficiales de Google con soporte multimodal (priorizando gemini-2.5-flash)
-    const modelos = ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-1.5-flash'];
-    let respuestaFinal = null;
-    let ultimoError = null;
+    // 1. Obtener dinámicamente los modelos activos disponibles para esta clave en Google AI
+    let modelosDisponibles = [];
+    try {
+      const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(cleanKey)}`, {
+        headers: { 'x-goog-api-key': cleanKey }
+      });
+      if (listRes.ok) {
+        const listData = await listRes.json();
+        if (Array.isArray(listData.models)) {
+          modelosDisponibles = listData.models
+            .filter(m => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent'))
+            .map(m => m.name.replace(/^models\//, ''));
+        }
+      }
+    } catch (e) {
+      console.warn('Aviso listando modelos en Google:', e);
+    }
 
-    for (const modelo of modelos) {
+    // Ordenar dando prioridad a los modelos Flash más modernos y compatibles
+    const modelosOrdenados = [];
+    const prioridades = [
+      'gemini-2.5-flash',
+      'gemini-3.8-flash',
+      'gemini-3.5-flash',
+      'gemini-2.0-flash',
+      'gemini-2.5-pro',
+      'gemini-1.5-flash'
+    ];
+
+    for (const p of prioridades) {
+      const match = modelosDisponibles.find(m => m === p || m.startsWith(p));
+      if (match && !modelosOrdenados.includes(match)) modelosOrdenados.push(match);
+    }
+    for (const m of modelosDisponibles) {
+      if (!modelosOrdenados.includes(m) && m.includes('flash')) modelosOrdenados.push(m);
+    }
+    for (const m of modelosDisponibles) {
+      if (!modelosOrdenados.includes(m)) modelosOrdenados.push(m);
+    }
+
+    // Si la lista dinámica falló o vino vacía, usar lista de fallback
+    const modelosAFinal = modelosOrdenados.length > 0
+      ? modelosOrdenados.slice(0, 4)
+      : ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-1.5-flash'];
+
+    let respuestaFinal = null;
+    const erroresDetalle = [];
+
+    for (const modelo of modelosAFinal) {
       try {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent?key=${encodeURIComponent(cleanKey)}`;
         const geminiRes = await fetch(url, {
@@ -138,7 +181,6 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO ADICIONAL):
         const data = await geminiRes.json();
         if (geminiRes.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
           let rawJson = data.candidates[0].content.parts[0].text.trim();
-          // Limpiar bloques markdown si el modelo los devolvió
           rawJson = rawJson.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim();
           const parsed = JSON.parse(rawJson);
           if (parsed && Array.isArray(parsed.meses) && parsed.meses.length > 0) {
@@ -146,11 +188,12 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO ADICIONAL):
             break;
           }
         } else {
-          ultimoError = data.error?.message || (data.error ? JSON.stringify(data.error) : `Error HTTP ${geminiRes.status}`);
-          console.warn(`Aviso modelo ${modelo}:`, ultimoError);
+          const errTxt = data.error?.message || (data.error ? JSON.stringify(data.error) : `HTTP ${geminiRes.status}`);
+          erroresDetalle.push(`${modelo}: ${errTxt}`);
+          console.warn(`Aviso modelo ${modelo}:`, errTxt);
         }
       } catch (err) {
-        ultimoError = err.message;
+        erroresDetalle.push(`${modelo}: ${err.message}`);
         console.warn(`Fallo llamada a modelo ${modelo}:`, err);
       }
       if (respuestaFinal) break;
@@ -159,7 +202,9 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO ADICIONAL):
     if (!respuestaFinal) {
       return res.status(500).json({
         error: 'ERROR_GEMINI',
-        message: ultimoError || 'No se pudo interpretar el cuadrante con el modelo de IA.'
+        message: erroresDetalle.length > 0
+          ? `Error analizando con IA (${erroresDetalle.join(' | ')})`
+          : 'No se pudo interpretar el cuadrante con el modelo de IA.'
       });
     }
 
