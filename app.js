@@ -5383,8 +5383,8 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO NI MARKDOWN):
 }
 `;
 
-  // Modelos oficiales con visión multimodal
-  const modelos = ['gemini-1.5-flash', 'gemini-2.0-flash'];
+  // Modelos oficiales con visión multimodal (priorizando gemini-2.5-flash)
+  const modelos = ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-1.5-flash'];
   let ultimoError = null;
 
   for (const modelo of modelos) {

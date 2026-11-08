@@ -101,8 +101,8 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO ADICIONAL):
     // Limpiar clave de comillas y espacios accidentales
     const cleanKey = String(geminiKey || '').trim().replace(/^['"]|['"]$/g, '');
 
-    // Modelos oficiales de Google con soporte multimodal
-    const modelos = ['gemini-1.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro'];
+    // Modelos oficiales de Google con soporte multimodal (priorizando gemini-2.5-flash)
+    const modelos = ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-1.5-flash'];
     let respuestaFinal = null;
     let ultimoError = null;
 
