@@ -5,6 +5,42 @@ export const config = {
   maxDuration: 60,
 };
 
+function extraerTextoRespuesta(data) {
+  if (!data) return null;
+  // Formato 1: generateContent estándar (data.candidates[0].content.parts[0].text)
+  if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
+    return data.candidates[0].content.parts[0].text;
+  }
+  // Formato 2: timeline/steps de la API Interactions
+  if (Array.isArray(data.steps)) {
+    for (const step of data.steps) {
+      if (Array.isArray(step.content)) {
+        for (const item of step.content) {
+          if (item && typeof item.text === 'string' && item.text.trim()) {
+            return item.text;
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function parsearRespuestaJSON(textoCrudo) {
+  if (!textoCrudo || typeof textoCrudo !== 'string') return null;
+  let raw = textoCrudo.trim();
+  raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/```$/i, '').trim();
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && Array.isArray(parsed.meses) && parsed.meses.length > 0) {
+      return parsed;
+    }
+  } catch (e) {
+    console.warn('Error parseando JSON de Gemini:', e.message);
+  }
+  return null;
+}
+
 export default async function handler(req, res) {
   // Configuración de cabeceras CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -34,7 +70,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Falta la imagen en base64 en la petición.' });
     }
 
-    // Límite de seguridad de tamaño de carga útil (máx. 15MB) para mitigar agotamiento de recursos / DoS
+    // Límite de seguridad de tamaño de carga útil (máx. 15MB)
     if (typeof imageBase64 === 'string' && imageBase64.length > 15 * 1024 * 1024) {
       return res.status(413).json({ error: 'La imagen excede el límite máximo de tamaño permitido (10MB).' });
     }
@@ -101,57 +137,106 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO ADICIONAL):
     // Limpiar clave de comillas y espacios accidentales
     const cleanKey = String(geminiKey || '').trim().replace(/^['"]|['"]$/g, '');
 
-    // Modelos rápidos compatibles con visión multimodal (orden de velocidad directa, sin llamadas previas lentas)
-    const modelos = ['gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+    // Modelos oficiales vigentes con visión multimodal ultra-rápida (2025/2026)
+    const modelos = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
     let respuestaFinal = null;
     let ultimoError = null;
 
     for (const modelo of modelos) {
+      // 1. Intentar con generateContent oficial (schema camelCase estándar)
       try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`;
-        const geminiRes = await fetch(url, {
+        const urlGenContent = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`;
+        const resGenContent = await fetch(urlGenContent, {
           method: 'POST',
-          headers: { 
+          headers: {
             'Content-Type': 'application/json',
             'x-goog-api-key': cleanKey
           },
+          signal: AbortSignal.timeout(8500),
           body: JSON.stringify({
             contents: [{
               parts: [
                 { text: promptInstrucciones },
                 {
-                  inline_data: {
-                    mime_type: mimeType,
+                  inlineData: {
+                    mimeType: mimeType,
                     data: cleanBase64
                   }
                 }
               ]
             }],
             generationConfig: {
-              response_mime_type: 'application/json',
+              responseMimeType: 'application/json',
               temperature: 0,
-              max_output_tokens: 4096
+              maxOutputTokens: 4096
             }
           })
         });
 
-        const data = await geminiRes.json();
-        if (geminiRes.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
-          let rawJson = data.candidates[0].content.parts[0].text.trim();
-          rawJson = rawJson.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim();
-          const parsed = JSON.parse(rawJson);
-          if (parsed && Array.isArray(parsed.meses) && parsed.meses.length > 0) {
+        const dataGen = await resGenContent.json();
+        if (resGenContent.ok) {
+          const texto = extraerTextoRespuesta(dataGen);
+          const parsed = parsearRespuestaJSON(texto);
+          if (parsed) {
             respuestaFinal = parsed;
             break;
           }
         } else {
-          ultimoError = data.error?.message || `HTTP ${geminiRes.status}`;
-          console.warn(`Aviso modelo ${modelo}:`, ultimoError);
+          ultimoError = dataGen.error?.message || `Error HTTP ${resGenContent.status}`;
+          console.warn(`Aviso generateContent con ${modelo}:`, ultimoError);
         }
-      } catch (err) {
-        ultimoError = err.message;
-        console.warn(`Fallo llamada a modelo ${modelo}:`, err);
+      } catch (errGen) {
+        ultimoError = errGen.name === 'TimeoutError' ? 'Tiempo de espera agotado en Vercel.' : errGen.message;
+        console.warn(`Error de red generateContent con ${modelo}:`, errGen);
       }
+
+      if (respuestaFinal) break;
+
+      // 2. Fallback a Interactions API si generateContent no responde
+      try {
+        const urlInteractions = 'https://generativelanguage.googleapis.com/v1beta/interactions';
+        const resInteractions = await fetch(urlInteractions, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': cleanKey
+          },
+          signal: AbortSignal.timeout(8500),
+          body: JSON.stringify({
+            model: modelo,
+            input: [
+              {
+                role: 'user',
+                content: [
+                  { type: 'text', text: promptInstrucciones },
+                  { type: 'image', mime_type: mimeType, data: cleanBase64 }
+                ]
+              }
+            ],
+            response_format: {
+              type: 'text',
+              mime_type: 'application/json'
+            }
+          })
+        });
+
+        const dataInteractions = await resInteractions.json();
+        if (resInteractions.ok) {
+          const texto = extraerTextoRespuesta(dataInteractions);
+          const parsed = parsearRespuestaJSON(texto);
+          if (parsed) {
+            respuestaFinal = parsed;
+            break;
+          }
+        } else {
+          ultimoError = dataInteractions.error?.message || `Error HTTP ${resInteractions.status}`;
+          console.warn(`Aviso interactions con ${modelo}:`, ultimoError);
+        }
+      } catch (errInteractions) {
+        ultimoError = errInteractions.name === 'TimeoutError' ? 'Tiempo de espera agotado.' : errInteractions.message;
+        console.warn(`Error de red interactions con ${modelo}:`, errInteractions);
+      }
+
       if (respuestaFinal) break;
     }
 
@@ -165,7 +250,7 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO ADICIONAL):
     return res.status(200).json(respuestaFinal);
 
   } catch (error) {
-    console.error('Error en /api/analizar-cuadrante:', error);
+    console.error('Error general en /api/analizar-cuadrante:', error);
     return res.status(500).json({ error: error.message });
   }
 }

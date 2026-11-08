@@ -4997,22 +4997,20 @@ if (btnGuardarGeminiKey && inputGeminiKey) {
 
 // Detectar y listar dinámicamente los modelos de Gemini disponibles para la clave del usuario
 async function obtenerModelosGeminiDisponibles(apiKey) {
-  const cleanKey = (apiKey || '').trim();
+  const cleanKey = (apiKey || '').trim().replace(/^['"]|['"]$/g, '');
   const preferencia = [
-    'gemini-2.0-flash',
-    'gemini-1.5-flash-latest',
-    'gemini-1.5-flash-002',
-    'gemini-1.5-flash',
     'gemini-2.5-flash',
-    'gemini-1.5-pro',
-    'gemini-pro'
+    'gemini-2.5-flash-lite',
+    'gemini-2.5-pro'
   ];
 
   if (!cleanKey) return preferencia;
 
   try {
-    // Consultar ModelService.ListModels para averiguar exactamente qué modelos admite la clave
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${cleanKey}`);
+    // Consultar ModelService.ListModels mediante header x-goog-api-key compatible con claves modernas AQ.
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models`, {
+      headers: { 'x-goog-api-key': cleanKey }
+    });
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data.models) && data.models.length > 0) {
@@ -5048,7 +5046,7 @@ async function obtenerModelosGeminiDisponibles(apiKey) {
 const btnProbarGeminiKey = document.getElementById('btn-probar-gemini-key');
 if (btnProbarGeminiKey && inputGeminiKey) {
   btnProbarGeminiKey.addEventListener('click', async () => {
-    const clave = (inputGeminiKey.value || localStorage.getItem(STORAGE_GEMINI_KEY) || '').trim();
+    const clave = (inputGeminiKey.value || localStorage.getItem(STORAGE_GEMINI_KEY) || '').trim().replace(/^['"]|['"]$/g, '');
     if (!clave) {
       return alert('Pega primero tu clave de Google Gemini para probarla.');
     }
@@ -5060,32 +5058,28 @@ if (btnProbarGeminiKey && inputGeminiKey) {
       let ultimoError = '';
 
       for (const modelo of modelos) {
-        const versiones = ['v1beta', 'v1'];
-        for (const vApi of versiones) {
-          try {
-            const url = `https://generativelanguage.googleapis.com/${vApi}/models/${modelo}:generateContent?key=${clave}`;
-            const res = await fetch(url, {
-              method: 'POST',
-              headers: { 
-                'Content-Type': 'application/json',
-                'x-goog-api-key': clave
-              },
-              body: JSON.stringify({
-                contents: [{ parts: [{ text: 'Di únicamente: OK' }] }]
-              })
-            });
-            const data = await res.json();
-            if (res.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
-              exito = true;
-              modeloFuncional = `${modelo} (${vApi})`;
-              break;
-            } else {
-              ultimoError = data.error?.message || (data.error ? JSON.stringify(data.error) : 'Respuesta desconocida de Google');
-              if (res.status === 404) break; // Probar siguiente modelo si este no existe en este endpoint
-            }
-          } catch (e) {
-            ultimoError = e.message;
+        try {
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`;
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: { 
+              'Content-Type': 'application/json',
+              'x-goog-api-key': clave
+            },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: 'Di únicamente: OK' }] }]
+            })
+          });
+          const data = await res.json();
+          if (res.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
+            exito = true;
+            modeloFuncional = `${modelo} (v1beta)`;
+            break;
+          } else {
+            ultimoError = data.error?.message || (data.error ? JSON.stringify(data.error) : 'Respuesta desconocida de Google');
           }
+        } catch (e) {
+          ultimoError = e.message;
         }
         if (exito) break;
       }
@@ -5383,8 +5377,8 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO NI MARKDOWN):
 }
 `;
 
-  // Modelos oficiales con visión multimodal (priorizando gemini-2.5-flash)
-  const modelos = ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-1.5-flash'];
+  // Modelos oficiales vigentes con visión multimodal
+  const modelos = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
   let ultimoError = null;
 
   for (const modelo of modelos) {
@@ -5393,7 +5387,7 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO NI MARKDOWN):
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`;
       
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 25000);
+      const timeoutId = setTimeout(() => controller.abort(), 20000);
 
       const res = await fetch(url, {
         method: 'POST',
@@ -5406,21 +5400,66 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO NI MARKDOWN):
           contents: [{
             parts: [
               { text: prompt },
-              { inline_data: { mime_type: mimeType || 'image/jpeg', data: cleanBase64 } }
+              {
+                inlineData: {
+                  mimeType: mimeType || 'image/jpeg',
+                  data: cleanBase64
+                }
+              }
             ]
           }],
           generationConfig: {
-            response_mime_type: 'application/json',
-            temperature: 0.1,
-            max_output_tokens: 8192
+            responseMimeType: 'application/json',
+            temperature: 0,
+            maxOutputTokens: 4096
           }
         })
       });
       clearTimeout(timeoutId);
 
       const data = await res.json();
-      if (res.ok && data.candidates?.[0]?.content?.parts?.[0]?.text) {
-        let rawJson = data.candidates[0].content.parts[0].text.trim();
+      let texto = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+      // Fallback a interactions si el endpoint estándar sugiere usar interactions API
+      if (!res.ok && data.error?.message?.includes('Interactions API')) {
+        try {
+          const resInt = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-goog-api-key': cleanKey
+            },
+            body: JSON.stringify({
+              model: modelo,
+              input: [
+                {
+                  role: 'user',
+                  content: [
+                    { type: 'text', text: prompt },
+                    { type: 'image', mime_type: mimeType || 'image/jpeg', data: cleanBase64 }
+                  ]
+                }
+              ],
+              response_format: { type: 'text', mime_type: 'application/json' }
+            })
+          });
+          const dataInt = await resInt.json();
+          if (resInt.ok && Array.isArray(dataInt.steps)) {
+            for (const step of dataInt.steps) {
+              if (Array.isArray(step.content)) {
+                for (const part of step.content) {
+                  if (part.text) { texto = part.text; break; }
+                }
+              }
+            }
+          }
+        } catch (eInt) {
+          console.warn('Interactions fallback error:', eInt);
+        }
+      }
+
+      if (texto) {
+        let rawJson = texto.trim();
         rawJson = rawJson.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim();
         const parsed = JSON.parse(rawJson);
         if (parsed && Array.isArray(parsed.meses) && parsed.meses.length > 0) {
