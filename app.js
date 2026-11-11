@@ -5511,7 +5511,16 @@ if (btnAnalizarFoto) {
     if (!resultado) {
       scanLoadingState.style.display = 'none';
       btnAnalizarFoto.style.display = 'inline-block';
-      alert(`❌ No se pudo analizar el cuadrante:\n${ultimoErrorDetalle || 'Comprueba la legibilidad de la imagen o tu clave de Gemini.'}`);
+      let errorEspanol = ultimoErrorDetalle || 'Comprueba la legibilidad de la imagen o tu clave de Gemini.';
+      const errLow = String(errorEspanol).toLowerCase();
+      if (errLow.includes('is no longer available') || errLow.includes('update your code')) {
+        errorEspanol = 'El modelo anterior de Google ha caducado. La app ya ha sido actualizada al nuevo modelo oficial Gemini 3.5 Flash.';
+      } else if (errLow.includes('api_key_invalid') || errLow.includes('api key not valid')) {
+        errorEspanol = 'La clave de Google Gemini no es válida o está mal copiada. Revísala en el botón ⚙️ Clave IA.';
+      } else if (errLow.includes('quota') || errLow.includes('resource_exhausted')) {
+        errorEspanol = 'Se ha superado temporalmente el límite gratuito de consultas por minuto de Google. Espera un momento y vuelve a intentarlo.';
+      }
+      alert(`❌ No se pudo analizar el cuadrante:\n\n${errorEspanol}`);
       return;
     }
 

@@ -261,9 +261,19 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO ADICIONAL):
     }
 
     if (!respuestaFinal) {
+      let mensajeAmigable = ultimoError || 'No se pudo interpretar el cuadrante con el modelo de IA.';
+      const mLower = String(mensajeAmigable).toLowerCase();
+      if (mLower.includes('is no longer available') || mLower.includes('update your code')) {
+        mensajeAmigable = 'El modelo anterior de Google ha dejado de estar disponible. Se ha actualizado la app a Gemini 3.5 Flash.';
+      } else if (mLower.includes('api_key_invalid') || mLower.includes('api key not valid')) {
+        mensajeAmigable = 'La clave de Google Gemini no es válida. Revisa tu clave en Google AI Studio.';
+      } else if (mLower.includes('quota') || mLower.includes('resource_exhausted')) {
+        mensajeAmigable = 'Se ha superado temporalmente el límite gratuito de consultas por minuto. Espera un minuto y vuelve a intentarlo.';
+      }
+
       return res.status(500).json({
         error: 'ERROR_GEMINI',
-        message: ultimoError || 'No se pudo interpretar el cuadrante con el modelo de IA.'
+        message: mensajeAmigable
       });
     }
 
