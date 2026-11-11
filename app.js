@@ -93,92 +93,11 @@ let miUserId = null;
 let esAdmin = false;
 let modoVista = 'mes'; 
 
-// Alternar entre métodos de acceso: Nombre & PIN vs Correo
-if (tabMetodoPin && tabMetodoEmail) {
-  tabMetodoPin.addEventListener('click', () => {
-    tabMetodoPin.classList.add('activo');
-    tabMetodoEmail.classList.remove('activo');
-    if (formAuthPinRapido) formAuthPinRapido.style.display = 'block';
-    if (formAuthEmail) formAuthEmail.style.display = 'none';
-  });
-
-  tabMetodoEmail.addEventListener('click', () => {
-    tabMetodoEmail.classList.add('activo');
-    tabMetodoPin.classList.remove('activo');
-    if (formAuthPinRapido) formAuthPinRapido.style.display = 'none';
-    if (formAuthEmail) formAuthEmail.style.display = 'block';
-  });
-}
-
 if (linkMostrarLoginNormal) {
   linkMostrarLoginNormal.addEventListener('click', (e) => {
     e.preventDefault();
     if (cardInvitacionOnboarding) cardInvitacionOnboarding.style.display = 'none';
     if (seccionLoginNormal) seccionLoginNormal.style.display = 'block';
-  });
-}
-
-// Iniciar sesión o crear perfil rápido con Nombre y PIN
-if (btnLoginRapido) {
-  btnLoginRapido.addEventListener('click', async () => {
-    const nombre = (loginRapidoNombre ? loginRapidoNombre.value : '').trim();
-    const pin = (loginRapidoPin ? loginRapidoPin.value : '').trim() || '1234';
-
-    if (!nombre) {
-      return alert('Por favor, escribe tu nombre para entrar o darte de alta.');
-    }
-    if (nombre.toLowerCase().startsWith('persona ')) {
-      return alert('Por favor, introduce tu nombre real.');
-    }
-
-    btnLoginRapido.textContent = 'Verificando...';
-
-    try {
-      const pinH = await hashPin(pin);
-      let perfil = (listaPerfiles || []).find(p => p && p.nombre && p.nombre.toLowerCase() === nombre.toLowerCase());
-
-      if (perfil) {
-        if (perfil.pin_hash && perfil.pin_hash !== pinH && pin !== '1234') {
-          btnLoginRapido.textContent = '🚀 Entrar / Crear Perfil';
-          return alert(`❌ Clave o PIN incorrecto para ${perfil.nombre}. Introduce tu PIN correcto.`);
-        }
-        btnLoginRapido.textContent = '🚀 Entrar / Crear Perfil';
-        const esCule = (perfil.nombre.toLowerCase() === 'cule');
-        concederAcceso(perfil.nombre, perfil.rol === 'admin' || esCule);
-      } else {
-        const esCule = (nombre.toLowerCase() === 'cule');
-        const nuevoPerfil = {
-          id: nombre,
-          nombre: nombre,
-          rol: esCule ? 'admin' : 'usuario',
-          ciudad_origen: 'Plasencia',
-          pin_hash: pinH
-        };
-        listaPerfiles.push(nuevoPerfil);
-        if (!usuarios.includes(nombre)) usuarios.push(nombre);
-        guardarPerfilesLocales();
-
-        try {
-          await supabaseApp.from('perfiles').upsert(nuevoPerfil, { onConflict: 'nombre' });
-        } catch(e) {}
-
-        const grupo = listaGrupos.find(g => obtenerNombreGrupo(g).toLowerCase() === (grupoActivo || 'amigos').toLowerCase()) || listaGrupos[0];
-        if (grupo) {
-          if (!Array.isArray(grupo.miembros)) grupo.miembros = [];
-          if (!grupo.miembros.some(m => String(m).toLowerCase() === nombre.toLowerCase())) {
-            grupo.miembros.push(nombre);
-            try { await sincronizarGrupoEnSupabase(grupo); } catch(e) {}
-          }
-        }
-
-        btnLoginRapido.textContent = '🚀 Entrar / Crear Perfil';
-        concederAcceso(nombre, esCule);
-        alert(`🎉 ¡Bienvenido/a a Kedadas, ${nombre}! Tu perfil ha sido creado.`);
-      }
-    } catch (err) {
-      btnLoginRapido.textContent = '🚀 Entrar / Crear Perfil';
-      alert('Error al acceder: ' + err.message);
-    }
   });
 }
 
@@ -201,7 +120,7 @@ function prepararPantallaInvitacion(codigo) {
     invitacionGrupoTitulo.textContent = `¡Te han invitado al grupo "${nombreGrupo}"!`;
   }
   if (invitacionGrupoDesc) {
-    invitacionGrupoDesc.textContent = `Date de alta con tu nombre para ver los turnos y quedadas de ${nombreGrupo}:`;
+    invitacionGrupoDesc.textContent = `Crea tu cuenta segura para ver los turnos y quedadas de ${nombreGrupo}:`;
   }
 
   if (cardInvitacionOnboarding) cardInvitacionOnboarding.style.display = 'block';
@@ -214,87 +133,67 @@ function prepararPantallaInvitacion(codigo) {
   }
 }
 
-// Acción de alta rápida para invitados
+// Acción de alta segura para invitados (con Supabase Auth)
 if (btnAltaInvitadoAccion) {
   btnAltaInvitadoAccion.addEventListener('click', async () => {
     const nombre = (inviteNombre ? inviteNombre.value : '').trim();
-    const pin = (invitePass ? invitePass.value : '').trim() || '1234';
+    const inviteEmailEl = document.getElementById('invite-email');
+    const email = (inviteEmailEl ? inviteEmailEl.value : '').trim();
+    const password = (invitePass ? invitePass.value : '').trim();
 
     if (!nombre) {
       return alert('Por favor, escribe tu nombre para que tus amigos te reconozcan en el cuadrante.');
     }
-    if (nombre.toLowerCase().startsWith('persona ')) {
-      return alert('Por favor, introduce tu nombre real.');
+    if (!email || !password || password.length < 6) {
+      return alert('Por favor, introduce un correo válido y una contraseña de al menos 6 caracteres.');
     }
 
-    btnAltaInvitadoAccion.textContent = 'Creando tu perfil...';
+    btnAltaInvitadoAccion.textContent = 'Creando tu cuenta...';
 
     try {
-      const pinH = await hashPin(pin);
-      let perfil = (listaPerfiles || []).find(p => p && p.nombre && p.nombre.toLowerCase() === nombre.toLowerCase());
-      const esCule = (nombre.toLowerCase() === 'cule');
-
-      if (!perfil) {
-        perfil = {
-          id: nombre,
-          nombre: nombre,
-          rol: esCule ? 'admin' : 'usuario',
-          ciudad_origen: 'Plasencia',
-          pin_hash: pinH
-        };
-        listaPerfiles.push(perfil);
-      } else {
-        perfil.pin_hash = pinH;
-      }
-
-      if (!usuarios.includes(nombre)) usuarios.push(nombre);
-      guardarPerfilesLocales();
-
-      try {
-        await supabaseApp.from('perfiles').upsert(perfil, { onConflict: 'nombre' });
-      } catch(e) {
-        console.warn('Aviso guardando perfil en Supabase:', e);
-      }
-
-      const cod = (codigoInvitacionPendiente || '').toUpperCase();
-      let grupoInv = (listaGrupos || []).find(g => {
-        if (!g) return false;
-        const gNorm = normalizarGrupo(g);
-        return (gNorm.codigo_acceso || '').toUpperCase() === cod || (g.id || '').toUpperCase() === cod;
+      const { data, error } = await supabaseApp.auth.signUp({
+        email,
+        password,
+        options: {
+          data: { nombre, rol: 'usuario' }
+        }
       });
 
-      if (!grupoInv && listaGrupos.length > 0) {
-        grupoInv = listaGrupos[0];
+      if (error) {
+        btnAltaInvitadoAccion.textContent = '🚀 Crear cuenta y entrar al grupo';
+        return alert('🚨 No se pudo crear la cuenta: ' + error.message);
       }
 
-      if (grupoInv) {
-        if (!Array.isArray(grupoInv.miembros)) grupoInv.miembros = [];
-        if (!grupoInv.miembros.some(m => String(m).toLowerCase() === nombre.toLowerCase())) {
-          grupoInv.miembros.push(nombre);
+      const user = data.user;
+      if (user) {
+        miUserId = user.id;
+
+        // Si hay sesión inmediata, unirse al grupo invitado via RPC
+        const cod = (codigoInvitacionPendiente || '').toUpperCase();
+        if (cod) {
           try {
-            await sincronizarGrupoEnSupabase(grupoInv);
-          } catch(e) {}
-          localStorage.setItem('kedadas_lista_grupos', JSON.stringify(listaGrupos));
+            await supabaseApp.rpc('join_group_with_code', { p_code: cod });
+          } catch(e) {
+            console.warn('Aviso uniendo a grupo via RPC:', e);
+          }
         }
+
+        concederAcceso(nombre, false);
+
+        try {
+          window.history.replaceState({}, document.title, window.location.pathname);
+        } catch(e) {}
+
+        if (typeof confetti === 'function') {
+          confetti({ particleCount: 70, spread: 90 });
+        }
+        alert(`🎉 ¡Bienvenido/a a Kedadas, ${nombre}! Tu cuenta segura ha sido creada.`);
+      } else {
+        btnAltaInvitadoAccion.textContent = '🚀 Crear cuenta y entrar al grupo';
+        alert('🎉 Cuenta creada. Por favor, revisa tu correo electrónico para confirmar el registro si así lo requiere tu configuración.');
       }
-
-      btnAltaInvitadoAccion.textContent = '🚀 Darme de alta y entrar al grupo';
-      concederAcceso(nombre, esCule);
-
-      if (grupoInv) {
-        cambiarGrupo(normalizarGrupo(grupoInv).nombre);
-      }
-
-      try {
-        window.history.replaceState({}, document.title, window.location.pathname);
-      } catch(e) {}
-
-      if (typeof confetti === 'function') {
-        confetti({ particleCount: 70, spread: 90 });
-      }
-      alert(`🎉 ¡Bienvenido/a, ${nombre}! Te has unido correctamente al grupo "${grupoInv ? normalizarGrupo(grupoInv).nombre : 'Kedadas'}".`);
     } catch (err) {
-      btnAltaInvitadoAccion.textContent = '🚀 Darme de alta y entrar al grupo';
+      btnAltaInvitadoAccion.textContent = '🚀 Crear cuenta y entrar al grupo';
       alert('Error en el alta: ' + err.message);
     }
   });
@@ -550,15 +449,14 @@ if (btnLogout) {
       try {
         await supabaseApp.auth.signOut();
       } catch(e) {}
+      miUserId = null;
       usuarioLogueado = '';
       miUsuario = '';
       try {
         localStorage.removeItem('kedadas_usuario_activo');
+        localStorage.removeItem('kedadas_passkey_id');
       } catch(e) {}
-      if (cardInvitacionOnboarding) cardInvitacionOnboarding.style.display = 'none';
-      if (seccionLoginNormal) seccionLoginNormal.style.display = 'block';
-      if (pantallaApp) pantallaApp.style.display = 'none';
-      if (pantallaLogin) pantallaLogin.style.display = 'block';
+      location.reload();
     }
   });
 }
@@ -623,28 +521,12 @@ function concederAcceso(nombreUsuario, rolAdmin) {
   try { actualizarSelectorUbicacionRapido(); } catch(e) {}
 }
 
-// --- 3. GESTIÓN DINÁMICA DE USUARIOS (DUAL SUPABASE + LOCAL) ---
+// --- 3. GESTIÓN DINÁMICA DE USUARIOS (VINCULADOS A SUPABASE AUTH) ---
 const STORAGE_PERFILES_KEY = 'kedadas_perfiles_v2';
 const STORAGE_USUARIOS_KEY = 'listaUsuarios';
 
-const HASH_DEFECTO_1234 = 'c8713d32bc75965c40cfea07ef93f9dd985f348954e81b3f39f768a0da544b53';
-
-async function hashPin(pin) {
-  if (!pin) return '';
-  const str = String(pin).trim();
-  if (/^[a-f0-9]{64}$/i.test(str)) return str.toLowerCase();
-  try {
-    const msgUint8 = new TextEncoder().encode(str + '_kedadas_salt_2026');
-    const hashBuffer = await window.crypto.subtle.digest('SHA-256', msgUint8);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-  } catch(e) {
-    return HASH_DEFECTO_1234;
-  }
-}
-
 const PERFILES_DEFECTO = [
-  { id: 'Cule', nombre: 'Cule', rol: 'admin', es_universitario: false, ciudad_origen: 'Plasencia', ciudad_universidad: '', ubicacion_actual: 'origen', pin_hash: HASH_DEFECTO_1234 }
+  { id: 'Cule', nombre: 'Cule', rol: 'admin', es_universitario: false, ciudad_origen: 'Plasencia', ciudad_universidad: '', ubicacion_actual: 'origen' }
 ];
 
 let listaPerfiles = [];
@@ -1514,6 +1396,7 @@ function renderizarSelector() {
 // Botón de alternar desplegable de personas y PINs
 if (btnEditarUsuarios) {
   btnEditarUsuarios.addEventListener('click', () => {
+    if (!panelDesplegableUsuarios) return;
     const estaVisible = panelDesplegableUsuarios.style.display !== 'none';
     panelDesplegableUsuarios.style.display = estaVisible ? 'none' : 'block';
     if (flechaDesplegableUsuarios) {
@@ -1528,6 +1411,7 @@ if (btnEditarUsuarios) {
 // Botón de personas en la barra superior
 if (btnTopPersonas) {
   btnTopPersonas.addEventListener('click', () => {
+    if (!panelDesplegableUsuarios) return;
     panelDesplegableUsuarios.style.display = 'block';
     if (flechaDesplegableUsuarios) flechaDesplegableUsuarios.textContent = '▴';
     actualizarEdicionPersonaDesplegable();
@@ -1538,7 +1422,7 @@ if (btnTopPersonas) {
 // Eliminar persona seleccionada en el desplegable
 if (btnBorrarPersonaDesplegable) {
   btnBorrarPersonaDesplegable.addEventListener('click', async () => {
-    const nombre = selectPersonaAEditar.value;
+    const nombre = selectPersonaAEditar?.value;
     if (!nombre) return;
     await eliminarUsuario(nombre);
   });
@@ -2708,13 +2592,8 @@ if (btnLimpiarMes) {
       console.warn('Aviso borrando en Supabase:', e);
     }
     
-    // Si se acaba de limpiar Diciembre (mes 11), situar de nuevo al usuario en Noviembre
-    if (mes === 11) {
-      fechaNavegacion = new Date(anio, 10, 1);
-    }
-    
     await iniciarCalendario();
-    alert(`✅ Turnos de ${nombre} ${anio} borrados con éxito.${mes === 11 ? ' Te hemos situado de nuevo en Noviembre.' : ''}`);
+    alert(`✅ Turnos de ${nombre} ${anio} borrados con éxito.`);
   });
 }
 
@@ -4453,19 +4332,18 @@ function pintarPlanesEnPantalla() {
 }
 
 async function cargarVotaciones() {
-  // 1. Cargar datos locales de inmediato (¡nunca se queda en "Cargando opciones..."!)
+  // 1. Cargar datos locales de inmediato
   listaPlanesMemoria = cargarPlanesDesdeStorage();
   pintarPlanesEnPantalla();
 
-  // 2. Sincronizar con Supabase en segundo plano
+  // 2. Sincronizar con Supabase en segundo plano usando group_id
+  const grupoObj = (listaGrupos || []).find(g => obtenerNombreGrupo(g).toLowerCase() === (grupoActivo || '').toLowerCase());
   try {
-    let query = supabaseApp.from('votaciones').select('*').eq('grupo', grupoActivo);
-    let { data, error } = await query;
-    if (error && error.message && error.message.includes('grupo')) {
-      const res = await supabaseApp.from('votaciones').select('*');
-      data = res.data;
-      error = res.error;
+    let query = supabaseApp.from('votaciones').select('*');
+    if (grupoObj && grupoObj.id) {
+      query = query.eq('group_id', grupoObj.id);
     }
+    const { data, error } = await query;
 
     if (!error && data && Array.isArray(data) && data.length > 0) {
       data.forEach(dbItem => {
@@ -4480,7 +4358,7 @@ async function cargarVotaciones() {
             id: dbItem.id,
             opcion: dbItem.opcion,
             votantes: votantes,
-            grupo: dbItem.grupo || grupoActivo
+            grupo: grupoActivo
           });
         }
       });
@@ -4515,10 +4393,12 @@ async function guardarNuevoPlan() {
   }
 
   const usuarioActual = usuarioLogueado || miUsuario || 'Cule';
+  const grupoObj = (listaGrupos || []).find(g => obtenerNombreGrupo(g).toLowerCase() === (grupoActivo || '').toLowerCase());
   const nuevoPlan = {
     id: `plan-${Date.now()}`,
     opcion: texto,
     votantes: [usuarioActual],
+    group_id: grupoObj?.id || null,
     grupo: grupoActivo
   };
 
@@ -4531,22 +4411,21 @@ async function guardarNuevoPlan() {
 
   // Guardar en Supabase en segundo plano
   try {
-    const res = await supabaseApp.from('votaciones').insert({
+    const payload = {
       opcion: texto,
-      votantes: JSON.stringify([usuarioActual]),
-      grupo: grupoActivo
-    }).select();
-
-    if (res.error && res.error.message && res.error.message.includes('grupo')) {
-      await supabaseApp.from('votaciones').insert({
-        opcion: texto,
-        votantes: JSON.stringify([usuarioActual])
-      });
-    } else if (!res.error && res.data && res.data[0]) {
+      votantes: JSON.stringify([usuarioActual])
+    };
+    if (grupoObj && grupoObj.id) {
+      payload.group_id = grupoObj.id;
+    }
+    const res = await supabaseApp.from('votaciones').insert(payload).select();
+    if (!res.error && res.data && res.data[0]) {
       nuevoPlan.id = res.data[0].id;
       guardarPlanesLocales();
     }
-  } catch(e) {}
+  } catch(e) {
+    console.warn('Aviso guardando plan en Supabase:', e);
+  }
 }
 
 if (btnGuardarNuevoPlan) {
@@ -4660,8 +4539,8 @@ function pintarTodosLosMensajes() {
 }
 
 async function cargarChatInicial() {
+  const grupoObj = (listaGrupos || []).find(g => obtenerNombreGrupo(g).toLowerCase() === (grupoActivo || '').toLowerCase());
   if (chatTituloGrupo) {
-    const grupoObj = (listaGrupos || []).find(g => obtenerNombreGrupo(g).toLowerCase() === (grupoActivo || '').toLowerCase());
     chatTituloGrupo.textContent = `💬 Tablón de Avisos (${grupoObj?.icono || '👥'} ${grupoActivo})`;
   }
 
@@ -4669,15 +4548,13 @@ async function cargarChatInicial() {
   listaMensajesMemoria = cargarChatDesdeStorage();
   pintarTodosLosMensajes();
 
-  // 2. Sincronizar con Supabase en segundo plano
+  // 2. Sincronizar con Supabase en segundo plano usando group_id
   try {
-    let query = supabaseApp.from('mensajes').select('*').eq('grupo', grupoActivo).order('created_at', { ascending: true });
-    let { data, error } = await query;
-    if (error && error.message && error.message.includes('grupo')) {
-      const res = await supabaseApp.from('mensajes').select('*').order('created_at', { ascending: true });
-      data = res.data;
-      error = res.error;
+    let query = supabaseApp.from('mensajes').select('*').order('created_at', { ascending: true });
+    if (grupoObj && grupoObj.id) {
+      query = query.eq('group_id', grupoObj.id);
     }
+    const { data, error } = await query;
 
     if (!error && data && Array.isArray(data) && data.length > 0) {
       data.forEach(dbMsg => {
@@ -4702,11 +4579,14 @@ async function enviarMensaje() {
   const ahora = new Date();
   const horaActual = ahora.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const usuarioActual = usuarioLogueado || miUsuario || 'Cule';
+  const grupoObj = (listaGrupos || []).find(g => obtenerNombreGrupo(g).toLowerCase() === (grupoActivo || '').toLowerCase());
 
   const nuevoMsg = {
     id: `msg-${Date.now()}`,
     usuario: usuarioActual,
+    usuario_id: miUserId,
     texto: texto,
+    group_id: grupoObj?.id || null,
     grupo: grupoActivo,
     hora: horaActual,
     created_at: ahora.toISOString()
@@ -4719,18 +4599,16 @@ async function enviarMensaje() {
 
   // Sincronizar con Supabase en segundo plano
   try {
-    const res = await supabaseApp.from('mensajes').insert({
+    const payload = {
       usuario: usuarioActual,
-      texto: texto,
-      grupo: grupoActivo
-    }).select();
-
-    if (res.error && res.error.message && res.error.message.includes('grupo')) {
-      await supabaseApp.from('mensajes').insert({
-        usuario: usuarioActual,
-        texto: texto
-      });
-    } else if (!res.error && res.data && res.data[0]) {
+      usuario_id: miUserId,
+      texto: texto
+    };
+    if (grupoObj && grupoObj.id) {
+      payload.group_id = grupoObj.id;
+    }
+    const res = await supabaseApp.from('mensajes').insert(payload).select();
+    if (!res.error && res.data && res.data[0]) {
       nuevoMsg.id = res.data[0].id;
       guardarChatLocales();
     }
@@ -5428,8 +5306,8 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO NI MARKDOWN):
 }
 `;
 
-  // Modelos oficiales vigentes con visión multimodal (Gemini 3.x)
-  const modelos = ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.6-flash'];
+  // Modelos oficiales vigentes con visión multimodal (Gemini 3.x y 2.5)
+  const modelos = ['gemini-3.5-flash-lite', 'gemini-3.5-flash', 'gemini-3.8-flash', 'gemini-2.5-flash'];
   let ultimoError = null;
 
   for (const modelo of modelos) {
@@ -5534,17 +5412,17 @@ if (btnAnalizarFoto) {
       return alert('Selecciona o fotografía un cuadrante primero (o adjunta un PDF o imagen existente).');
     }
 
-    const modoSeleccionado = document.querySelector('input[name="scan-modo"]:checked')?.value || 'mes';
-    // Tomar estrictamente el mes indicado en el selector del modal (10 = Noviembre por defecto)
-    let mesSeleccionado = 10;
+    const modoSeleccionado = document.querySelector('input[name="scan-modo"]:checked')?.value || 'auto';
+    // Determinar el mes objetivo dinámicamente según navegación o selector
+    let mesSeleccionado = null;
     if (modoSeleccionado === 'ano') {
       mesSeleccionado = null;
     } else if (scanMesObjetivo && scanMesObjetivo.value !== '' && !isNaN(parseInt(scanMesObjetivo.value))) {
       mesSeleccionado = parseInt(scanMesObjetivo.value);
     } else {
-      mesSeleccionado = (fechaNavegacion && fechaNavegacion.getMonth() !== 11) ? fechaNavegacion.getMonth() : 10;
+      mesSeleccionado = (fechaNavegacion instanceof Date) ? fechaNavegacion.getMonth() : new Date().getMonth();
     }
-    const anoSeleccionado = parseInt(scanAnoObjetivo?.value) || fechaNavegacion.getFullYear();
+    const anoSeleccionado = parseInt(scanAnoObjetivo?.value) || (fechaNavegacion ? fechaNavegacion.getFullYear() : new Date().getFullYear());
     const usuarioObjetivo = scanUsuarioObjetivo ? scanUsuarioObjetivo.value : miUsuario;
 
     let claveGeminiLocal = (localStorage.getItem(STORAGE_GEMINI_KEY) || '').trim();
@@ -5557,12 +5435,25 @@ if (btnAnalizarFoto) {
     let resultado = null;
     let ultimoErrorDetalle = '';
 
-    // 1. Intentar primero con la función serverless (/api/analizar-cuadrante) si está disponible en Vercel
+    // 1. Intentar primero con la función serverless (/api/analizar-cuadrante) con token de sesión de Supabase
     try {
       scanStatusSub.textContent = `Extrayendo turnos para ${usuarioObjetivo} con Gemini Vision...`;
+      
+      const reqHeaders = { 'Content-Type': 'application/json' };
+      try {
+        if (typeof supabaseApp !== 'undefined' && supabaseApp.auth) {
+          const { data: sessionData } = await supabaseApp.auth.getSession();
+          if (sessionData?.session?.access_token) {
+            reqHeaders['Authorization'] = `Bearer ${sessionData.session.access_token}`;
+          }
+        }
+      } catch (eAuth) {
+        console.warn('No se pudo adjuntar token de sesión en llamada IA:', eAuth);
+      }
+
       const resServidor = await fetch('/api/analizar-cuadrante', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: reqHeaders,
         body: JSON.stringify({
           imageBase64: imagenBase64Actual,
           mimeType: mimeTypeActual,
@@ -6059,61 +5950,61 @@ window.addEventListener('DOMContentLoaded', async () => {
     codigoInvitacion = (params.get('unirse') || params.get('codigo') || params.get('join') || '').trim().toUpperCase();
   } catch(e) {}
 
-  // Determinar usuario activo guardado en este dispositivo
-  let usuarioGuardado = '';
-  try {
-    const u = localStorage.getItem('kedadas_usuario_activo');
-    if (u && typeof u === 'string') {
-      const uTrim = u.trim();
-      if (ALIASES_CULE.includes(uTrim.toLowerCase())) {
-        usuarioGuardado = 'Cule';
-        localStorage.setItem('kedadas_usuario_activo', 'Cule');
-      } else if (uTrim.toLowerCase() !== 'marisol' && uTrim.toLowerCase() !== 'usuario' && !uTrim.toLowerCase().startsWith('persona ')) {
-        usuarioGuardado = uTrim;
-      } else {
-        localStorage.removeItem('kedadas_usuario_activo');
-      }
-    }
-  } catch(e) {}
+  // Comprobar sesión criptográfica real en Supabase Auth
+  let usuarioAutenticado = null;
+  let esAdminAutenticado = false;
 
-  // Comprobar sesión en Supabase Auth si existe
   try {
-    const { data: { session } } = await supabaseApp.auth.getSession();
-    if (session && session.user) {
+    const { data: { session }, error: sessionError } = await supabaseApp.auth.getSession();
+    if (session && session.user && !sessionError) {
+      miUserId = session.user.id;
       const email = (session.user.email || '').trim().toLowerCase();
-      let nombre = session.user.user_metadata?.nombre;
+      
+      // Consultar perfil vinculado en Supabase
+      const { data: perfil } = await supabaseApp
+        .from('perfiles')
+        .select('*')
+        .eq('user_id', miUserId)
+        .maybeSingle();
+
+      let nombre = perfil?.nombre || session.user.user_metadata?.nombre;
       if (esAdminCule(email, nombre)) {
-        usuarioGuardado = 'Cule';
-        try {
-          await supabaseApp.from('perfiles').update({ user_id: session.user.id, rol: 'admin' }).eq('nombre', 'Cule');
-        } catch(e) {}
-      } else if (nombre) {
-        usuarioGuardado = nombre;
+        nombre = 'Cule';
+        esAdminAutenticado = true;
+      } else {
+        esAdminAutenticado = Boolean(perfil?.is_superadmin || perfil?.rol === 'admin');
       }
+
+      if (!nombre) {
+        nombre = email.split('@')[0];
+      }
+
+      usuarioAutenticado = nombre;
     }
   } catch (e) {
-    console.warn('No se encontró sesión activa de Supabase Auth.');
+    console.warn('Error verificando sesión en Supabase:', e);
   }
 
-  // GESTIÓN INTELIGENTE DE ACCESO:
-  if (codigoInvitacion) {
-    if (usuarioGuardado) {
-      // Dispositivo con sesión iniciada previamente: acceder y preguntar unirse
-      concederAcceso(usuarioGuardado, usuarioGuardado.toLowerCase() === 'cule');
+  // GESTIÓN DE ACCESO ESTRICTA:
+  if (usuarioAutenticado) {
+    concederAcceso(usuarioAutenticado, esAdminAutenticado);
+    if (codigoInvitacion) {
       comprobarParametroInvitacionUrl();
-    } else {
-      // AMIGO INVITADO EN DISPOSITIVO NUEVO: mostrar onboarding para dar de alta su nombre y PIN
-      prepararPantallaInvitacion(codigoInvitacion);
     }
-  } else if (usuarioGuardado) {
-    // DISPOSITIVO REGISTRADO (ej: Cule en su móvil): restaurar sesión directa
-    concederAcceso(usuarioGuardado, usuarioGuardado.toLowerCase() === 'cule');
   } else {
-    // DISPOSITIVO NUEVO SIN SESIÓN: mostrar pantalla de login (sin auto-loguear como Cule)
+    // Si no hay sesión válida, limpiar datos obsoletos y mostrar login
+    miUserId = null;
+    usuarioLogueado = '';
+    miUsuario = '';
+    try { localStorage.removeItem('kedadas_usuario_activo'); } catch(e) {}
     if (pantallaApp) pantallaApp.style.display = 'none';
     if (pantallaLogin) pantallaLogin.style.display = 'block';
-    if (cardInvitacionOnboarding) cardInvitacionOnboarding.style.display = 'none';
-    if (seccionLoginNormal) seccionLoginNormal.style.display = 'block';
+    if (cardInvitacionOnboarding && codigoInvitacion) {
+      prepararPantallaInvitacion(codigoInvitacion);
+    } else {
+      if (cardInvitacionOnboarding) cardInvitacionOnboarding.style.display = 'none';
+      if (seccionLoginNormal) seccionLoginNormal.style.display = 'block';
+    }
   }
 
   // Sistema de compartir horarios e invitaciones directas

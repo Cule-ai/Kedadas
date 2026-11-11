@@ -20,7 +20,6 @@ create table if not exists public.perfiles (
   ciudad_origen text default 'Plasencia',
   ciudad_universidad text,
   ubicacion_actual text default 'origen',
-  password text default '1234',
   created_at timestamptz not null default timezone('utc'::text, now())
 );
 
@@ -110,7 +109,12 @@ begin
       v_nombre,
       case when v_es_superadmin then 'superadmin' else 'usuario' end,
       v_es_superadmin
-    );
+    )
+    on conflict (nombre) do update
+    set user_id = excluded.user_id,
+        email = excluded.email,
+        is_superadmin = excluded.is_superadmin or perfiles.is_superadmin,
+        rol = case when excluded.is_superadmin then 'superadmin' else perfiles.rol end;
   end if;
 
   return new;
@@ -293,11 +297,21 @@ create table if not exists public."Turnos" (
   dia integer not null,
   usuario text not null,
   usuario_id uuid references auth.users(id) on delete set null,
-  indiceEstado integer not null default 0,
+  "indiceEstado" integer not null default 0,
   mes_anio text not null,
   created_at timestamptz not null default timezone('utc'::text, now()),
   constraint unique_usuario_dia_mes unique (usuario, dia, mes_anio)
 );
+
+-- Garantizar compatibilidad de nombre de columna camelCase "indiceEstado"
+do $$
+begin
+  if not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'Turnos' and column_name = 'indiceEstado') then
+    if exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'Turnos' and column_name = 'indiceestado') then
+      alter table public."Turnos" rename column indiceestado to "indiceEstado";
+    end if;
+  end if;
+end $$;
 
 alter table public."Turnos" add column if not exists usuario_id uuid references auth.users(id) on delete set null;
 
@@ -600,6 +614,14 @@ drop policy if exists "mensajes_insert" on public.mensajes;
 create policy "mensajes_insert" on public.mensajes for insert to authenticated
   with check (public.is_superadmin() or group_id is null or public.is_group_member(group_id, auth.uid()));
 
+drop policy if exists "mensajes_delete" on public.mensajes;
+create policy "mensajes_delete" on public.mensajes for delete to authenticated
+  using (
+    public.is_superadmin()
+    or usuario_id = auth.uid()
+    or usuario in (select p.nombre from public.perfiles p where p.user_id = auth.uid())
+  );
+
 drop policy if exists "votaciones_select" on public.votaciones;
 create policy "votaciones_select" on public.votaciones for select to authenticated
   using (public.is_superadmin() or group_id is null or public.is_group_member(group_id, auth.uid()));
@@ -607,6 +629,15 @@ create policy "votaciones_select" on public.votaciones for select to authenticat
 drop policy if exists "votaciones_insert" on public.votaciones;
 create policy "votaciones_insert" on public.votaciones for insert to authenticated
   with check (public.is_superadmin() or group_id is null or public.is_group_member(group_id, auth.uid()));
+
+drop policy if exists "votaciones_update" on public.votaciones;
+create policy "votaciones_update" on public.votaciones for update to authenticated
+  using (public.is_superadmin() or group_id is null or public.is_group_member(group_id, auth.uid()))
+  with check (public.is_superadmin() or group_id is null or public.is_group_member(group_id, auth.uid()));
+
+drop policy if exists "votaciones_delete" on public.votaciones;
+create policy "votaciones_delete" on public.votaciones for delete to authenticated
+  using (public.is_superadmin() or group_id is null or public.is_group_member(group_id, auth.uid()));
 
 -- POLÍTICAS: PUSH SUBSCRIPTIONS
 drop policy if exists "push_subscriptions_all" on public.push_subscriptions;
@@ -648,19 +679,18 @@ alter table public.calendar_shares force row level security;
 
 -- Políticas de seguridad (RLS) blindadas para calendar_shares:
 drop policy if exists "calendar_shares_select" on public.calendar_shares;
-create policy "calendar_shares_select" on public.calendar_shares for select to anon, authenticated
+create policy "calendar_shares_select" on public.calendar_shares for select to authenticated
   using (
     public.is_superadmin()
     or owner_id = auth.uid()
     or granted_to_id = auth.uid()
     or lower(owner_name) in (select lower(p.nombre) from public.perfiles p where p.user_id = auth.uid())
     or lower(granted_to) in (select lower(p.nombre) from public.perfiles p where p.user_id = auth.uid())
-    or length(trim(owner_name)) > 0
   );
 
 -- Permitir conceder permisos (INSERT / UPSERT): Solo el dueño legítimo sobre su propio horario (o superadmin)
 drop policy if exists "calendar_shares_insert" on public.calendar_shares;
-create policy "calendar_shares_insert" on public.calendar_shares for insert to anon, authenticated
+create policy "calendar_shares_insert" on public.calendar_shares for insert to authenticated
   with check (
     length(trim(owner_name)) > 0 
     and length(trim(granted_to)) > 0
@@ -669,20 +699,18 @@ create policy "calendar_shares_insert" on public.calendar_shares for insert to a
       public.is_superadmin()
       or owner_id = auth.uid()
       or lower(owner_name) in (select lower(p.nombre) from public.perfiles p where p.user_id = auth.uid())
-      or auth.uid() is null
     )
   );
 
 -- Permitir revocar permisos (DELETE): Solo el dueño o el beneficiario
 drop policy if exists "calendar_shares_delete" on public.calendar_shares;
-create policy "calendar_shares_delete" on public.calendar_shares for delete to anon, authenticated
+create policy "calendar_shares_delete" on public.calendar_shares for delete to authenticated
   using (
     public.is_superadmin()
     or owner_id = auth.uid()
     or granted_to_id = auth.uid()
     or lower(owner_name) in (select lower(p.nombre) from public.perfiles p where p.user_id = auth.uid())
     or lower(granted_to) in (select lower(p.nombre) from public.perfiles p where p.user_id = auth.uid())
-    or auth.uid() is null
   );
 
 -- Actualizar política de Turnos para permitir lectura cuando existe share
@@ -723,12 +751,37 @@ alter table public.grupos enable row level security;
 alter table public.grupos force row level security;
 
 drop policy if exists "grupos_select_all" on public.grupos;
-create policy "grupos_select_all" on public.grupos for select to anon, authenticated using (true);
+drop policy if exists "grupos_select_authenticated" on public.grupos;
+create policy "grupos_select_authenticated" on public.grupos for select to authenticated
+  using (
+    public.is_superadmin()
+    or creador in (select p.nombre from public.perfiles p where p.user_id = auth.uid())
+    or exists (
+      select 1 from public.perfiles p
+      where p.user_id = auth.uid()
+        and (miembros ? p.nombre or miembros ? lower(p.nombre))
+    )
+  );
 
 drop policy if exists "grupos_insert_all" on public.grupos;
-create policy "grupos_insert_all" on public.grupos for insert to anon, authenticated with check (true);
+drop policy if exists "grupos_insert_authenticated" on public.grupos;
+create policy "grupos_insert_authenticated" on public.grupos for insert to authenticated
+  with check (
+    public.is_superadmin()
+    or creador in (select p.nombre from public.perfiles p where p.user_id = auth.uid())
+  );
 
 drop policy if exists "grupos_update_all" on public.grupos;
-create policy "grupos_update_all" on public.grupos for update to anon, authenticated using (true) with check (true);
+drop policy if exists "grupos_update_authenticated" on public.grupos;
+create policy "grupos_update_authenticated" on public.grupos for update to authenticated
+  using (
+    public.is_superadmin()
+    or creador in (select p.nombre from public.perfiles p where p.user_id = auth.uid())
+    or exists (
+      select 1 from public.perfiles p
+      where p.user_id = auth.uid()
+        and (miembros ? p.nombre or miembros ? lower(p.nombre))
+    )
+  );
 
 

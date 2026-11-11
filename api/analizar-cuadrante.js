@@ -1,9 +1,14 @@
 // Vercel Serverless Function: /api/analizar-cuadrante
 // Reconoce cuadrantes laborales de fotos y capturas (mensual o anual) usando Gemini Vision AI
 
+import { createClient } from '@supabase/supabase-js';
+
 export const config = {
   maxDuration: 60,
 };
+
+const SUPABASE_URL = process.env.SUPABASE_URL || 'https://idpgvtixeyytfgpkqjjm.supabase.co';
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
 
 function extraerTextoRespuesta(data) {
   if (!data) return null;
@@ -70,9 +75,26 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Falta la imagen en base64 en la petición.' });
     }
 
-    // Límite de seguridad de tamaño de carga útil (máx. 15MB)
-    if (typeof imageBase64 === 'string' && imageBase64.length > 15 * 1024 * 1024) {
-      return res.status(413).json({ error: 'La imagen excede el límite máximo de tamaño permitido (10MB).' });
+    // 0. Verificación de Seguridad y Autenticación
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+
+    if (!clientApiKey) {
+      if (!token) {
+        return res.status(401).json({ error: 'No autorizado. Se requiere inicio de sesión para usar el escáner con IA del servidor.' });
+      }
+      if (SUPABASE_SERVICE_KEY) {
+        const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+        const { data: userData, error: userError } = await supabase.auth.getUser(token);
+        if (userError || !userData?.user) {
+          return res.status(401).json({ error: 'Sesión no válida o expirada. Inicia sesión de nuevo.' });
+        }
+      }
+    }
+
+    // Límite de seguridad de tamaño de carga útil (máx. 4.5MB en Vercel Serverless)
+    if (typeof imageBase64 === 'string' && imageBase64.length > 4.5 * 1024 * 1024) {
+      return res.status(413).json({ error: 'La imagen excede el límite máximo permitido (4.5MB). Reduce la resolución antes de subirla.' });
     }
 
     // Tomar la clave de Gemini proporcionada por el cliente o la variable de entorno de Vercel
@@ -88,42 +110,77 @@ export default async function handler(req, res) {
     // Limpiar base64 si contiene prefijo data URL (imágenes o PDF)
     const cleanBase64 = imageBase64.replace(/^data:[^;]+;base64,/, '');
 
-    // Mes en formato 0-indexado (0 = Enero, ..., 10 = Noviembre, 11 = Diciembre)
+    const esModoAno = modoEscaneo === 'ano' || (modoEscaneo === 'auto' && (mes === null || mes === undefined));
+    const listaMeses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
     const mesIndex = (mes !== null && mes !== undefined && !isNaN(parseInt(mes)))
       ? parseInt(mes)
-      : 10;
-    const mesNombreReferencia = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'][mesIndex] || 'Noviembre';
-    const numeroMesHumano = mesIndex + 1; // 11 para Noviembre
+      : new Date().getMonth();
+    const mesNombreReferencia = listaMeses[mesIndex] || 'Enero';
+    const numeroMesHumano = mesIndex + 1;
 
-    const promptInstrucciones = `
+    const promptInstrucciones = esModoAno
+      ? `
+Eres un digitalizador experto en cuadrantes de turnos laborales (sanidad, policía, emergencias, fábricas, hostelería, etc.).
+Tu misión es extraer con total exactitud todos los turnos del trabajador/cuadrante en la imagen para el AÑO COMPLETO o todos los meses presentes.
+
+CONTEXTO DE BÚSQUEDA:
+- Trabajador a extraer: "${usuario}". Si hay múltiples filas con nombres de personas, busca la fila correspondiente a "${usuario}". Si es un cuadrante individual, extrae el cuadrante visible.
+- Año de referencia: ${anio}.
+- Modo: Año completo (extrae todos los meses presentes en el documento, del 0 al 11).
+
+CONVENCIÓN DE TURNOS PERMITIDOS:
+- "M": Turno de Mañana.
+- "T": Turno de Tarde.
+- "N": Turno de Noche.
+- "L": Día Libre / Descanso / Saliente.
+- "V": Vacaciones / Permiso.
+- "X": Vacío o sin turno asignado.
+
+IMPORTANTE: Asigna estrictamente el turno reflejado en cada celda del cuadrante con total fidelidad a la imagen original, sin forzar ni inventar turnos.
+
+FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN MARKDOWN):
+{
+  "modo": "ano",
+  "anio": ${anio},
+  "resumen": "Cuadrante anual detectado para ${usuario} en ${anio}...",
+  "meses": [
+    {
+      "mes": 0,
+      "nombreMes": "Enero",
+      "dias": [
+        { "dia": 1, "turno": "M" },
+        { "dia": 2, "turno": "T" }
+      ]
+    }
+  ]
+}
+`
+      : `
 Eres un digitalizador experto en cuadrantes de turnos laborales (sanidad, policía, emergencias, fábricas, hostelería, etc.).
 Tu misión es extraer con total exactitud todos los turnos del trabajador/cuadrante en la imagen.
 
 CONTEXTO DE BÚSQUEDA Y MES OBLIGATORIO:
-- Trabajador a extraer: "${usuario}" (busca también por "Culebras", "Miguel Ángel", o la fila correspondiente si hay una lista de personal).
+- Trabajador a extraer: "${usuario}". Si hay múltiples filas con nombres de personas, busca la fila correspondiente a "${usuario}". Si es un cuadrante individual, extrae el cuadrante principal visible.
 - Año de referencia: ${anio}.
 - Mes de referencia OBLIGATORIO: ${mesNombreReferencia} (Mes ${numeroMesHumano} del año).
-- Debes extraer EXCLUSIVAMENTE los turnos del mes de ${mesNombreReferencia} ${anio}. NO extraigas meses posteriores como Diciembre.
+- Debes extraer los turnos correspondientes al mes de ${mesNombreReferencia} ${anio}.
 - Modo solicitado: "${modoEscaneo}".
 
 CONVENCIÓN DE TURNOS PERMITIDOS:
-- "M": Turno de Mañana (ejemplos: M, M1, M2, 07:00-15:00, 08:00-15:00, Mañana).
-- "T": Turno de Tarde (ejemplos: T, T1, T2, 15:00-23:00, 14:00-22:00, Tarde).
-- "N": Turno de Noche (ejemplos: N, N1, 23:00-07:00, 22:00-06:00, Noche, Guardia noche).
-- "L": Día Libre / Descanso / Saliente (ejemplos: L, D, S, Saliente, Libre, Descanso, Festivo libre).
-- "V": Vacaciones / Permiso (ejemplos: V, VAC, AP, Asuntos propios, Permiso, Baja).
+- "M": Turno de Mañana.
+- "T": Turno de Tarde.
+- "N": Turno de Noche.
+- "L": Día Libre / Descanso / Saliente.
+- "V": Vacaciones / Permiso.
 - "X": Vacío o sin turno asignado.
 
-IMPORTANTE SOBRE PRECISIÓN Y CONTRASTE (MAÑANA VS TARDE):
-- Revisa celda por celda cada día del mes (1 al 28/29/30/31).
-- Distingue con extrema precisión entre "M" (Mañana) y "T" (Tarde).
-- ATENCIÓN ESPECIAL a los días 14 y 24: si en el cuadrante indican turno de mañana ("M"), márcalos obligatoriamente como "M".
+IMPORTANTE: Asigna estrictamente el turno reflejado en cada celda del cuadrante con total fidelidad a la imagen original, sin forzar ni inventar turnos.
 
 REGLAS DE FORMATO Y FECHAS:
 1. El campo "nombreMes" DEBE ser "${mesNombreReferencia}".
-2. El campo "mes" DEBE ser exactamente ${mesIndex} (número 0 a 11, donde 10 es Noviembre).
+2. El campo "mes" DEBE ser exactamente ${mesIndex} (número 0 a 11, donde 0 es Enero).
 3. El campo "dia" DEBE ser el número entero del día (1 al 31).
-4. Asegúrate de incluir todos los días del mes presentes en la foto.
 
 FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO ADICIONAL):
 {
@@ -147,13 +204,14 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO ADICIONAL):
     // Limpiar clave de comillas y espacios accidentales
     const cleanKey = String(geminiKey || '').trim().replace(/^['"]|['"]$/g, '');
 
-    // Modelos oficiales vigentes para cuentas nuevas de Google AI Studio (Gemini 3.x)
-    const modelos = ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.6-flash'];
+    // Modelos oficiales vigentes para Google AI Studio (Gemini 3.x prioritario, fallback a 2.5 / 2.0)
+    const modelos = ['gemini-3.5-flash-lite', 'gemini-3.5-flash', 'gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-2.0-flash'];
     let respuestaFinal = null;
     let ultimoError = null;
 
+    const maxTokens = esModoAno ? 8192 : 4096;
+
     for (const modelo of modelos) {
-      // 1. Intentar con generateContent oficial (schema camelCase estándar)
       try {
         const urlGenContent = `https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`;
         const resGenContent = await fetch(urlGenContent, {
@@ -162,7 +220,7 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO ADICIONAL):
             'Content-Type': 'application/json',
             'x-goog-api-key': cleanKey
           },
-          signal: AbortSignal.timeout(8500),
+          signal: AbortSignal.timeout(22000),
           body: JSON.stringify({
             contents: [{
               parts: [
@@ -177,7 +235,7 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO ADICIONAL):
             }],
             generationConfig: {
               responseMimeType: 'application/json',
-              maxOutputTokens: 4096
+              maxOutputTokens: maxTokens
             }
           })
         });
@@ -197,53 +255,6 @@ FORMATO DE RESPUESTA EXCLUSIVO (JSON VÁLIDO SIN TEXTO ADICIONAL):
       } catch (errGen) {
         ultimoError = errGen.name === 'TimeoutError' ? 'Tiempo de espera agotado en Vercel.' : errGen.message;
         console.warn(`Error de red generateContent con ${modelo}:`, errGen);
-      }
-
-      if (respuestaFinal) break;
-
-      // 2. Fallback a Interactions API si generateContent no responde
-      try {
-        const urlInteractions = 'https://generativelanguage.googleapis.com/v1beta/interactions';
-        const resInteractions = await fetch(urlInteractions, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': cleanKey
-          },
-          signal: AbortSignal.timeout(8500),
-          body: JSON.stringify({
-            model: modelo,
-            input: [
-              {
-                role: 'user',
-                content: [
-                  { type: 'text', text: promptInstrucciones },
-                  { type: 'image', mime_type: mimeType, data: cleanBase64 }
-                ]
-              }
-            ],
-            response_format: {
-              type: 'text',
-              mime_type: 'application/json'
-            }
-          })
-        });
-
-        const dataInteractions = await resInteractions.json();
-        if (resInteractions.ok) {
-          const texto = extraerTextoRespuesta(dataInteractions);
-          const parsed = parsearRespuestaJSON(texto);
-          if (parsed) {
-            respuestaFinal = parsed;
-            break;
-          }
-        } else {
-          ultimoError = dataInteractions.error?.message || `Error HTTP ${resInteractions.status}`;
-          console.warn(`Aviso interactions con ${modelo}:`, ultimoError);
-        }
-      } catch (errInteractions) {
-        ultimoError = errInteractions.name === 'TimeoutError' ? 'Tiempo de espera agotado.' : errInteractions.message;
-        console.warn(`Error de red interactions con ${modelo}:`, errInteractions);
       }
 
       if (respuestaFinal) break;

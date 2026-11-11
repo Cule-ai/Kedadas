@@ -27,7 +27,7 @@
   <meta http-equiv="X-Content-Type-Options" content="nosniff">
   <meta name="referrer" content="strict-origin-when-cross-origin">
 
-  <link rel="stylesheet" href="style.css?v=39">
+  <link rel="stylesheet" href="style.css?v=40">
 </head>
 <body>
 
@@ -46,65 +46,48 @@
       <div class="invitacion-badge-header">🎉 Invitación al Grupo</div>
       <h3 id="invitacion-grupo-titulo" style="margin: 8px 0; color: #1e293b;">¡Te han invitado a unirte!</h3>
       <p class="invitacion-desc" id="invitacion-grupo-desc" style="font-size: 0.85rem; color: #64748b; margin-bottom: 15px;">
-        Date de alta en 10 segundos para ver el cuadrante y coincidir libres:
+        Crea tu cuenta segura en 15 segundos para ver el cuadrante y coincidir libres:
       </p>
 
       <form id="form-alta-invitado" onsubmit="return false;">
-        <input type="text" id="invite-nombre" placeholder="Tu Nombre (ej: Pedro, Laura...)" maxlength="25" required style="width: 100%; padding: 12px; border-radius: 12px; border: 1.5px solid #cbd5e1; margin-bottom: 10px; font-weight: 700; font-size: 1rem; box-sizing: border-box;">
-        <input type="password" id="invite-pass" placeholder="Elige tu PIN / Clave (ej: 1234)" required style="width: 100%; padding: 12px; border-radius: 12px; border: 1.5px solid #cbd5e1; margin-bottom: 5px; font-size: 1rem; box-sizing: border-box;">
-        <small style="display: block; color: #64748b; font-size: 0.75rem; margin-bottom: 12px; text-align: left;">Protege tu horario para que solo tú puedas editarlo.</small>
-        <button type="button" id="btn-alta-invitado-accion" class="btn-login" style="width: 100%; background: linear-gradient(135deg, #4f46e5, #6366f1);">
-          🚀 Darme de alta y entrar al grupo
+        <input type="text" id="invite-nombre" placeholder="Tu Nombre (ej: Laura, Pedro...)" maxlength="25" required style="width: 100%; padding: 12px; border-radius: 12px; border: 1.5px solid #cbd5e1; margin-bottom: 10px; font-weight: 700; font-size: 1rem; box-sizing: border-box;">
+        <input type="email" id="invite-email" placeholder="Tu Correo Electrónico" required style="width: 100%; padding: 12px; border-radius: 12px; border: 1.5px solid #cbd5e1; margin-bottom: 10px; font-size: 1rem; box-sizing: border-box;">
+        <input type="password" id="invite-pass" placeholder="Crea tu Contraseña (mínimo 6 caracteres)" required style="width: 100%; padding: 12px; border-radius: 12px; border: 1.5px solid #cbd5e1; margin-bottom: 5px; font-size: 1rem; box-sizing: border-box;">
+        <small style="display: block; color: #64748b; font-size: 0.75rem; margin-bottom: 12px; text-align: left;">Protege tu cuenta para que solo tú puedas editar tus turnos.</small>
+        <button type="button" id="btn-alta-invitado-accion" class="btn-login" style="width: 100%; background: linear-gradient(135deg, #4f46e5, #6366f1); color: white;">
+          🚀 Crear cuenta y entrar al grupo
         </button>
       </form>
       
       <div style="margin-top: 15px;">
         <a href="#" id="link-mostrar-login-normal" style="font-size: 0.82rem; color: #4f46e5; text-decoration: underline;">
-          ¿Ya tienes cuenta o prefieres correo? Inicia sesión aquí
+          ¿Ya tienes cuenta? Inicia sesión aquí
         </a>
       </div>
     </div>
 
-    <!-- Pestañas principales de acceso: Nombre y PIN vs Correo -->
+    <!-- Pestañas principales de acceso: Iniciar Sesión vs Crear Cuenta -->
     <div id="seccion-login-normal">
-      <div class="login-tabs" id="auth-metodo-tabs" style="display: flex; gap: 6px; margin-bottom: 15px;">
-        <button type="button" id="tab-metodo-pin" class="login-tab activo" style="flex: 1;">👤 Nombre y PIN</button>
-        <button type="button" id="tab-metodo-email" class="login-tab" style="flex: 1;">📧 Correo</button>
+      <div class="login-tabs" id="auth-modo-tabs" style="display: flex; gap: 6px; margin-bottom: 15px;">
+        <button type="button" id="tab-auth-login" class="login-tab activo" style="flex: 1;">🔐 Iniciar Sesión</button>
+        <button type="button" id="tab-auth-registro" class="login-tab" style="flex: 1;">✨ Crear Cuenta</button>
       </div>
 
-      <!-- MODO 1: ACCESO RÁPIDO Y ALTA CON NOMBRE Y PIN (IDEAL PARA AMIGOS) -->
-      <div id="form-auth-pin-rapido" style="display: block;">
-        <input type="text" id="login-rapido-nombre" placeholder="Tu Nombre (ej: Cule, Laura...)" maxlength="30" style="width: 100%; padding: 12px; border-radius: 12px; border: 1.5px solid #cbd5e1; margin-bottom: 10px; font-weight: 700; font-size: 1rem; box-sizing: border-box;">
-        <input type="password" id="login-rapido-pin" placeholder="Tu Clave o PIN (por defecto 1234)" style="width: 100%; padding: 12px; border-radius: 12px; border: 1.5px solid #cbd5e1; margin-bottom: 12px; font-size: 1rem; box-sizing: border-box;">
-        <button type="button" id="btn-login-rapido" class="btn-login" style="width: 100%; background: #4f46e5; color: white;">
-          🚀 Entrar / Crear Perfil
-        </button>
-      </div>
-
-      <!-- MODO 2: SUPABASE AUTH OFICIAL (EMAIL / CONTRASEÑA) -->
-      <div id="form-auth-email" class="login-form-seccion" style="display: none;">
-        <div class="login-tabs" id="auth-modo-tabs">
-          <button type="button" id="tab-auth-login" class="login-tab activo">🔐 Iniciar Sesión</button>
-          <button type="button" id="tab-auth-registro" class="login-tab">✨ Nueva Cuenta</button>
-        </div>
-
+      <div id="form-auth-email" class="login-form-seccion">
         <div id="wrap-nombre-registro" style="display: none; margin-bottom: 10px;">
-          <input type="text" id="login-nombre-reg" placeholder="Tu Nombre para el cuadrante (ej: Laura)" maxlength="30">
+          <input type="text" id="login-nombre-reg" placeholder="Tu Nombre para el cuadrante (ej: Laura)" maxlength="30" style="width: 100%; padding: 12px; border-radius: 12px; border: 1.5px solid #cbd5e1; font-weight: 700; font-size: 1rem; box-sizing: border-box;">
         </div>
 
-        <input type="email" id="login-email" placeholder="Correo electrónico" autocomplete="email">
-        <input type="password" id="login-password" placeholder="Contraseña (mínimo 6 caracteres)" autocomplete="current-password">
+        <input type="email" id="login-email" placeholder="Correo electrónico" autocomplete="email" style="width: 100%; padding: 12px; border-radius: 12px; border: 1.5px solid #cbd5e1; margin-bottom: 10px; font-size: 1rem; box-sizing: border-box;">
+        <input type="password" id="login-password" placeholder="Contraseña (mínimo 6 caracteres)" autocomplete="current-password" style="width: 100%; padding: 12px; border-radius: 12px; border: 1.5px solid #cbd5e1; margin-bottom: 12px; font-size: 1rem; box-sizing: border-box;">
 
         <div class="auth-buttons-row">
-          <button id="btn-login-email" class="btn-login" style="width: 100%;">Iniciar Sesión</button>
-          <button id="btn-register-email" class="btn-register" style="display: none; width: 100%;">Crear Cuenta</button>
+          <button id="btn-login-email" class="btn-login" style="width: 100%; background: #4f46e5; color: white;">Iniciar Sesión</button>
+          <button id="btn-register-email" class="btn-register" style="display: none; width: 100%; background: linear-gradient(135deg, #4f46e5, #6366f1); color: white;">Crear Cuenta</button>
         </div>
 
-        <a href="#" id="link-recuperar-pass" class="link-recuperar">¿Olvidaste tu contraseña?</a>
+        <a href="#" id="link-recuperar-pass" class="link-recuperar" style="display: block; margin-top: 12px; font-size: 0.85rem; color: #4f46e5;">¿Olvidaste tu contraseña?</a>
       </div>
-
-      <div class="divisor-login"><span>o bien</span></div>
-      <button id="btn-login-faceid" class="btn-faceid">🔑 Entrar con Passkey / Biometría</button>
     </div>
   </div>
 
@@ -942,7 +925,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="app.js?v=39"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.48.1/dist/umd/supabase.min.js"></script>
+  <script src="app.js?v=40"></script>
 </body>
 </html>

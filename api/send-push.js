@@ -4,14 +4,14 @@
 import webpush from 'web-push';
 import { createClient } from '@supabase/supabase-js';
 
-const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || 'BPFV66ewMSEPBptLh0be-rpRSnEc01H4_HoFHxglPYyCb6Bequ7WFeqUhqMzMcB7PBninBqx4gBbrEyq1R1jxvI';
+const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY;
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
-const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:maculecale@gmail.com';
+const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:admin@kedadas.app';
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://idpgvtixeyytfgpkqjjm.supabase.co';
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY || 'sb_publishable_S7NTo7XKekBigTm8U17rQA_u2Cp0SrI';
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-if (VAPID_PRIVATE_KEY) {
+if (VAPID_PRIVATE_KEY && VAPID_PUBLIC_KEY) {
   try {
     webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
   } catch(e) {
@@ -32,8 +32,12 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Método no permitido. Usa POST.' });
   }
 
-  if (!VAPID_PRIVATE_KEY) {
-    return res.status(500).json({ error: 'Configuración del servidor incompleta (VAPID_PRIVATE_KEY requerida en variables de entorno).' });
+  if (!VAPID_PRIVATE_KEY || !VAPID_PUBLIC_KEY) {
+    return res.status(500).json({ error: 'Configuración del servidor incompleta (VAPID_PUBLIC_KEY y VAPID_PRIVATE_KEY requeridas en variables de entorno de Vercel).' });
+  }
+
+  if (!SUPABASE_SERVICE_KEY) {
+    return res.status(500).json({ error: 'Configuración del servidor incompleta (SUPABASE_SERVICE_ROLE_KEY requerida en variables de entorno de Vercel).' });
   }
 
   try {
@@ -84,8 +88,11 @@ export default async function handler(req, res) {
       }
     }
 
-    // 2. Envío a las suscripciones almacenadas en Supabase
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+    // 2. Envío a las suscripciones almacenadas en Supabase (filtradas por usuario si se especifica)
+    if (!userId && !isApiKeyValid) {
+      return res.status(400).json({ error: 'Debes especificar el destinatario (userId).' });
+    }
+
     let query = supabase.from('push_subscriptions').select('*');
     if (userId) {
       query = query.eq('user_id', userId);

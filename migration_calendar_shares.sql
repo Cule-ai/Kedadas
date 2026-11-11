@@ -46,18 +46,17 @@ alter table public.calendar_shares force row level security;
 
 -- 5. Políticas de seguridad (RLS) para calendar_shares:
 drop policy if exists "calendar_shares_select" on public.calendar_shares;
-create policy "calendar_shares_select" on public.calendar_shares for select to anon, authenticated
+create policy "calendar_shares_select" on public.calendar_shares for select to authenticated
   using (
     public.is_superadmin()
     or owner_id = auth.uid()
     or granted_to_id = auth.uid()
     or lower(owner_name) in (select lower(p.nombre) from public.perfiles p where p.user_id = auth.uid())
     or lower(granted_to) in (select lower(p.nombre) from public.perfiles p where p.user_id = auth.uid())
-    or length(trim(owner_name)) > 0
   );
 
 drop policy if exists "calendar_shares_insert" on public.calendar_shares;
-create policy "calendar_shares_insert" on public.calendar_shares for insert to anon, authenticated
+create policy "calendar_shares_insert" on public.calendar_shares for insert to authenticated
   with check (
     length(trim(owner_name)) > 0 
     and length(trim(granted_to)) > 0
@@ -66,19 +65,17 @@ create policy "calendar_shares_insert" on public.calendar_shares for insert to a
       public.is_superadmin()
       or owner_id = auth.uid()
       or lower(owner_name) in (select lower(p.nombre) from public.perfiles p where p.user_id = auth.uid())
-      or auth.uid() is null
     )
   );
 
 drop policy if exists "calendar_shares_delete" on public.calendar_shares;
-create policy "calendar_shares_delete" on public.calendar_shares for delete to anon, authenticated
+create policy "calendar_shares_delete" on public.calendar_shares for delete to authenticated
   using (
     public.is_superadmin()
     or owner_id = auth.uid()
     or granted_to_id = auth.uid()
     or lower(owner_name) in (select lower(p.nombre) from public.perfiles p where p.user_id = auth.uid())
     or lower(granted_to) in (select lower(p.nombre) from public.perfiles p where p.user_id = auth.uid())
-    or auth.uid() is null
   );
 
 -- 6. Actualizar políticas completas en la tabla "Turnos" (Lectura y Guardado para todos los miembros)
